@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Lime Studio
+GenericName=Digital Audio Workstation
+Comment=Pattern-based music production
+Exec=limestudio %f
+Icon=limestudio
+Terminal=false
+Categories=AudioVideo;Audio;Midi;Music;
+StartupWMClass=limestudio
+Keywords=DAW;music;audio;sequencer;

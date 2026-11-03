@@ -1,0 +1,17 @@
+[package]
+name = "lemon-glitch"
+description = "Lime Glitch: a tempo-synced step-sequenced multi-effect as VST3 / CLAP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+linked = []
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["vst3"] }
+lemon-small-fx = { path = "../lemon-small-fx" }
+os-plugkit = { path = "../../crates/os-plugkit" }
