@@ -1,17 +1,17 @@
 OSPRESET 1
 plugin=Lime Glitch	id=clap:org.openstudio.lime-glitch	format=clap	body=params
 # One retrigger hit on each quarter note.
-Step 1 = 10000
-Step 5 = 10000
-Step 9 = 10000
-Step 13 = 10000
-Retrigger lane = 10000
-Gate lane = 0
-Crush lane = 0
-Filter lane = 0
-Retrigger depth = 6500
-Gate depth = 6500
-Crush depth = 6500
-Filter depth = 6500
+Retrigger step 01 = 10000
+Retrigger step 05 = 10000
+Retrigger step 09 = 10000
+Retrigger step 13 = 10000
+Retrigger enabled = 10000
+Gater enabled = 0
+Lofi enabled = 0
+Repeats = 5000
+Duty = 5000
+Bit depth = 5000
 Mix = 10000
-Subdivision = 2
+Step count = 0
+Pattern bars = 0
+Sub-division = 1

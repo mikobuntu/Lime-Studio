@@ -15,3 +15,4 @@ linked = []
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["vst3"] }
 lemon-small-fx = { path = "../lemon-small-fx" }
 os-plugkit = { path = "../../crates/os-plugkit" }
+os-ui = { path = "../../crates/os-ui" }

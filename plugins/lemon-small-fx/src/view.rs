@@ -11,14 +11,14 @@
 // lemon-fast-distortion.md, lemon-balance.md, lemon-stereo-enhancer.md, lemon-transient-processor.md, lemon-chorus.md,
 // lemon-stereo-shaper.md; each §2 controls); ui/lemon-design.md §11.1
 
-use os_theme::design::lemon as brand;
 use os_theme::Palette;
+use os_theme::design::lemon as brand;
 use os_ui::kit::eq as keq;
 use os_ui::kit::lemon::{self, plug};
-use os_ui::kit::{inst, State};
+use os_ui::kit::{State, inst};
 use os_ui::{Canvas, Color, Font, Rect};
 
-use crate::{Control, Mark, Spec, MAX};
+use crate::{Control, MAX, Mark, Spec};
 
 /// Dials bigger than this get the thicker arc.
 const SMALL: f32 = 19.0;
@@ -80,8 +80,12 @@ pub fn offset(spec: &Spec, vals: &os_plugkit::vals::Vals, k: usize) -> Option<i3
 /// A setting's shown plain value: its stored one less the spec's offset, in its range.
 pub fn shown_plain(spec: &Spec, vals: &os_plugkit::vals::Vals, id: &str) -> f32 {
     let stored = vals.plain(id);
-    let Some(k) = spec.index(id) else { return stored };
-    let Some(off) = offset(spec, vals, k) else { return stored };
+    let Some(k) = spec.index(id) else {
+        return stored;
+    };
+    let Some(off) = offset(spec, vals, k) else {
+        return stored;
+    };
     let (lo, hi) = spec.settings[k].range;
     (stored - off as f32).clamp(lo as f32, hi as f32)
 }
@@ -96,8 +100,12 @@ pub fn shown_norm(spec: &Spec, vals: &os_plugkit::vals::Vals, id: &str) -> f32 {
 
 /// The stored plain that shows as `shown`: the shown value plus the spec's offset, in the range.
 pub fn stored_plain(spec: &Spec, vals: &os_plugkit::vals::Vals, id: &str, shown: f32) -> f32 {
-    let Some(k) = spec.index(id) else { return shown };
-    let Some(off) = offset(spec, vals, k) else { return shown };
+    let Some(k) = spec.index(id) else {
+        return shown;
+    };
+    let Some(off) = offset(spec, vals, k) else {
+        return shown;
+    };
     let (lo, hi) = spec.settings[k].range;
     (shown + off as f32).clamp(lo as f32, hi as f32)
 }
@@ -105,7 +113,9 @@ pub fn stored_plain(spec: &Spec, vals: &os_plugkit::vals::Vals, id: &str, shown:
 /// A setting's shown value text.
 pub fn shown_text(spec: &Spec, vals: &os_plugkit::vals::Vals, id: &str) -> String {
     match spec.index(id) {
-        Some(k) if offset(spec, vals, k).is_some() => (spec.text)(k, shown_plain(spec, vals, id).round() as i32),
+        Some(k) if offset(spec, vals, k).is_some() => {
+            (spec.text)(k, shown_plain(spec, vals, id).round() as i32)
+        }
         _ => vals.text(id),
     }
 }
@@ -129,7 +139,9 @@ impl Target {
     /// The setting's id ("" for the wordmark).
     pub fn id(&self) -> &str {
         match self {
-            Target::Knob(id) | Target::Fader(id, _) | Target::Choice(id, _) | Target::Text(id) => id,
+            Target::Knob(id) | Target::Fader(id, _) | Target::Choice(id, _) | Target::Text(id) => {
+                id
+            }
             Target::Logo => "",
         }
     }
@@ -146,6 +158,7 @@ pub struct Hit {
 pub struct ViewState {
     pub mouse: Option<(f32, f32)>,
     pub pressed: Option<Target>,
+    pub playhead: Option<usize>,
     /// The saved state the text fields show ([`Control::Text`]).
     pub raw: Vec<u8>,
 }
@@ -164,20 +177,43 @@ impl Ui<'_> {
     }
     fn state(&self, r: Rect, t: &Target) -> State {
         let pressed = self.st.pressed.as_ref() == Some(t);
-        let hover = !pressed && self.st.pressed.is_none() && self.st.mouse.is_some_and(|(x, y)| r.contains(x, y));
-        State { hover, pressed, ..State::NORMAL }
+        let hover = !pressed
+            && self.st.pressed.is_none()
+            && self.st.mouse.is_some_and(|(x, y)| r.contains(x, y));
+        State {
+            hover,
+            pressed,
+            ..State::NORMAL
+        }
     }
 }
 
 /// The settings shown (the first `n` of `MAX`).
 pub fn values(spec: &Spec, m: &dyn Model) -> [i32; MAX] {
-    std::array::from_fn(|k| spec.settings.get(k).map_or(0, |s| m.plain(s.id).round() as i32))
+    std::array::from_fn(|k| {
+        spec.settings
+            .get(k)
+            .map_or(0, |s| m.plain(s.id).round() as i32)
+    })
 }
 
 /// Paints the editor; `hint` (empty when the host shows it) goes in the hint well, or over the display's top-left
 /// corner.
-pub fn paint(spec: &Spec, c: &mut Canvas, t: &Palette, m: &dyn Model, st: &ViewState, hint: &str) -> Vec<Hit> {
-    let mut ui = Ui { c, t, m, st, hits: Vec::new() };
+pub fn paint(
+    spec: &Spec,
+    c: &mut Canvas,
+    t: &Palette,
+    m: &dyn Model,
+    st: &ViewState,
+    hint: &str,
+) -> Vec<Hit> {
+    let mut ui = Ui {
+        c,
+        t,
+        m,
+        st,
+        hits: Vec::new(),
+    };
     ui.c.begin_frame(None);
     ui.c.clear(plug::BG);
     for card in spec.cards {
@@ -188,12 +224,28 @@ pub fn paint(spec: &Spec, c: &mut Canvas, t: &Palette, m: &dyn Model, st: &ViewS
     }
     for control in spec.controls {
         match *control {
-            Control::Knob { id, cx, cy, r, caption, bipolar } => knob(&mut ui, id, cx, cy, r, caption, bipolar),
+            Control::Knob {
+                id,
+                cx,
+                cy,
+                r,
+                caption,
+                bipolar,
+            } => knob(&mut ui, id, cx, cy, r, caption, bipolar),
             Control::Choice { id, x, top, names } => {
                 let min = spec.index(id).map_or(0, |k| spec.settings[k].range.0);
                 choices(&mut ui, id, x, top, min, names);
             }
-            Control::Fader { id, x, top, bot, label, col, bipolar, marks } => fader(&mut ui, id, x, top, bot, label, col, bipolar, marks),
+            Control::Fader {
+                id,
+                x,
+                top,
+                bot,
+                label,
+                col,
+                bipolar,
+                marks,
+            } => fader(&mut ui, id, x, top, bot, label, col, bipolar, marks),
             Control::Shape { id, cx, cy } => {
                 let range = spec.index(id).map_or((0, 1), |k| spec.settings[k].range);
                 shape(&mut ui, id, cx, cy, range);
@@ -202,8 +254,47 @@ pub fn paint(spec: &Spec, c: &mut Canvas, t: &Palette, m: &dyn Model, st: &ViewS
                 let range = spec.index(id).map_or((0, 1), |k| spec.settings[k].range);
                 switch_box(&mut ui, id, cx, cy, range);
             }
-            Control::Tile { id, x0, y0, x1, y1, caption } => tile(&mut ui, id, Rect::span(x0, x1, y0, y1), caption),
-            Control::Text { id, x0, y0, x1, y1, show, .. } => {
+            Control::StepGrid {
+                ids,
+                labels,
+                enabled_ids,
+                amount_ids,
+                aux_ids,
+                columns,
+                rows,
+                length_id,
+                rect,
+            } => {
+                step_grid(
+                    &mut ui,
+                    ids,
+                    labels,
+                    enabled_ids,
+                    amount_ids,
+                    aux_ids,
+                    columns,
+                    rows,
+                    length_id,
+                    rect,
+                );
+            }
+            Control::Tile {
+                id,
+                x0,
+                y0,
+                x1,
+                y1,
+                caption,
+            } => tile(&mut ui, id, Rect::span(x0, x1, y0, y1), caption),
+            Control::Text {
+                id,
+                x0,
+                y0,
+                x1,
+                y1,
+                show,
+                ..
+            } => {
                 let (text, status) = show(&st.raw);
                 text_field(&mut ui, id, Rect::span(x0, x1, y0, y1), &text, &status);
             }
@@ -226,7 +317,14 @@ pub fn paint(spec: &Spec, c: &mut Canvas, t: &Palette, m: &dyn Model, st: &ViewS
             }
             lemon::plug_well(ui.c, well, 6.0);
             if !hint.is_empty() {
-                ui.c.text_clip(HINT, well.x + 8.0, (well.cy() - lh / 2.0).round(), well.w - 16.0, brand::TEXT, hint);
+                ui.c.text_clip(
+                    HINT,
+                    well.x + 8.0,
+                    (well.cy() - lh / 2.0).round(),
+                    well.w - 16.0,
+                    brand::TEXT,
+                    hint,
+                );
             }
         }
         (None, Some(d)) if !hint.is_empty() => {
@@ -249,7 +347,10 @@ fn heading(ui: &mut Ui, x0: f32, x1: f32, y: f32, s: &str) {
     lemon::spaced(ui.c, HEADING, tx, (y - lh / 2.0).round(), plug::DIM, s, 2.0);
     if tx - 7.0 > x0 + 8.0 {
         ui.c.fill_rect(Rect::span(x0 + 4.0, tx - 7.0, y, y + 1.0), RULE);
-        ui.c.fill_rect(Rect::span((tx + w + 6.0).round(), x1 - 4.0, y, y + 1.0), RULE);
+        ui.c.fill_rect(
+            Rect::span((tx + w + 6.0).round(), x1 - 4.0, y, y + 1.0),
+            RULE,
+        );
     }
 }
 
@@ -258,11 +359,26 @@ fn knob(ui: &mut Ui, id: &str, cx: f32, cy: f32, r: f32, cap: &str, bipolar: boo
     let target = Target::Knob(id.into());
     let hr = Rect::new(cx - r - 3.0, cy - r - 3.0, 2.0 * r + 6.0, 2.0 * r + 6.0);
     let st = ui.state(hr, &target);
-    lemon::dial(ui.c, cx, cy, r, if r > SMALL { 3.2 } else { 2.8 }, ui.m.norm(id), bipolar, brand::MAIN, st);
+    lemon::dial(
+        ui.c,
+        cx,
+        cy,
+        r,
+        if r > SMALL { 3.2 } else { 2.8 },
+        ui.m.norm(id),
+        bipolar,
+        brand::MAIN,
+        st,
+    );
     if cap.is_empty() {
         let lh = ui.c.line_height(LABEL);
         let text = ui.m.text(id);
-        ui.c.text_center(LABEL, Rect::new(cx - 50.0, cy + r + 6.0, 100.0, lh), brand::MAIN, &text);
+        ui.c.text_center(
+            LABEL,
+            Rect::new(cx - 50.0, cy + r + 6.0, 100.0, lh),
+            brand::MAIN,
+            &text,
+        );
     } else {
         inst::caption(ui.c, ui.t, cx, cy + r + 7.0, cap, false);
     }
@@ -282,7 +398,13 @@ fn choices(ui: &mut Ui, id: &str, x: f32, top: f32, min: i32, names: &[&str]) {
         let r = Rect::span(x - 2.0, (x + 20.0 + w).ceil(), y, y + 15.0);
         let st = ui.state(r, &target);
         lemon::toggle(ui.c, x + 6.0, y + 7.5, chosen == v, st);
-        let ink = if chosen == v { brand::MAIN } else if st.hover { brand::TEXT } else { plug::DIM };
+        let ink = if chosen == v {
+            brand::MAIN
+        } else if st.hover {
+            brand::TEXT
+        } else {
+            plug::DIM
+        };
         ui.c.text(LABEL, x + 17.0, (y + 7.5 - lh / 2.0).round(), ink, name);
         ui.hit(r, target);
     }
@@ -291,11 +413,25 @@ fn choices(ui: &mut Ui, id: &str, x: f32, top: f32, min: i32, names: &[&str]) {
 /// A fader (as Lemon Reverb's): a slot over `top..bot`, ticks at `marks`, a fill in `col` up to the handle (from the
 /// middle when `bipolar`), `label` over it in `col`.
 #[allow(clippy::too_many_arguments)]
-fn fader(ui: &mut Ui, id: &str, x: f32, top: f32, bot: f32, label: &str, col: Color, bipolar: bool, marks: &[f32]) {
+fn fader(
+    ui: &mut Ui,
+    id: &str,
+    x: f32,
+    top: f32,
+    bot: f32,
+    label: &str,
+    col: Color,
+    bipolar: bool,
+    marks: &[f32],
+) {
     let target = Target::Fader(id.into(), bot - top);
     let hr = Rect::new(x - 11.0, top - 8.0, 22.0, bot - top + 16.0);
     let st = ui.state(hr, &target);
-    keq::slot(ui.c, Rect::new(x - 3.0, top - 4.0, 6.0, bot - top + 8.0), st);
+    keq::slot(
+        ui.c,
+        Rect::new(x - 3.0, top - 4.0, 6.0, bot - top + 8.0),
+        st,
+    );
     let at = |n: f32| bot - (bot - top) * n.clamp(0.0, 1.0);
     for &n in marks {
         let y = at(n).round();
@@ -305,11 +441,20 @@ fn fader(ui: &mut Ui, id: &str, x: f32, top: f32, bot: f32, label: &str, col: Co
     let y = at(ui.m.norm(id));
     let from = if bipolar { at(0.5) } else { bot };
     if (from - y).abs() > 1.0 {
-        ui.c.fill_rrect(Rect::span(x - 1.0, x + 1.0, y.min(from), y.max(from)), 1.0, col.with_alpha(190));
+        ui.c.fill_rrect(
+            Rect::span(x - 1.0, x + 1.0, y.min(from), y.max(from)),
+            1.0,
+            col.with_alpha(190),
+        );
     }
     keq::handle(ui.c, x, y.round(), col, st);
     let lh = ui.c.line_height(LABEL);
-    ui.c.text_center(LABEL, Rect::new(x - 12.0, top - 10.0 - lh, 24.0, lh), col, label);
+    ui.c.text_center(
+        LABEL,
+        Rect::new(x - 12.0, top - 10.0 - lh, 24.0, lh),
+        col,
+        label,
+    );
     ui.hit(hr, target);
 }
 
@@ -322,7 +467,11 @@ fn shape(ui: &mut Ui, id: &str, cx: f32, cy: f32, (lo, hi): (i32, i32)) {
     let r = Rect::new(cx - 20.0, cy - 10.0, 40.0, 20.0);
     let st = ui.state(r, &target);
     lemon::plug_button(ui.c, r, 5.0, st);
-    let n = if hi > lo { (v - lo).clamp(0, hi - lo) as f32 / (hi - lo) as f32 } else { 0.0 };
+    let n = if hi > lo {
+        (v - lo).clamp(0, hi - lo) as f32 / (hi - lo) as f32
+    } else {
+        0.0
+    };
     // The rise's curve: t^p, p from 0.35 (sharp) to 2.8 (slow); the fall mirrors it.
     let p = 0.35 * 8.0f32.powf(n);
     let (x0, x1, y0, y1) = (cx - 13.0, cx + 13.0, cy + 5.0, cy - 5.0);
@@ -346,12 +495,130 @@ fn switch_box(ui: &mut Ui, id: &str, cx: f32, cy: f32, (lo, hi): (i32, i32)) {
     let next = if v >= hi || v < lo { lo } else { hi };
     let target = Target::Choice(id.into(), next);
     let r = Rect::new(cx - 25.0, cy - 9.0, 50.0, 18.0);
-    let st = State { on: v == hi && hi > lo, ..ui.state(r, &target) };
+    let st = State {
+        on: v == hi && hi > lo,
+        ..ui.state(r, &target)
+    };
     let ink = lemon::plug_button(ui.c, r, 5.0, st);
     let text = ui.m.text(id).to_uppercase();
     let lh = ui.c.line_height(LABEL);
-    ui.c.text_center(LABEL, Rect::new(r.x, (r.cy() - lh / 2.0).round(), r.w, lh), ink, &text);
+    ui.c.text_center(
+        LABEL,
+        Rect::new(r.x, (r.cy() - lh / 2.0).round(), r.w, lh),
+        ink,
+        &text,
+    );
     ui.hit(r, target);
+}
+
+fn step_grid(
+    ui: &mut Ui,
+    ids: &[&[&str]],
+    labels: &[&str],
+    enabled_ids: &[&str],
+    amount_ids: &[&str],
+    aux_ids: &[&str],
+    columns: usize,
+    rows: usize,
+    length_id: &str,
+    rect: Rect,
+) {
+    let columns = columns.max(1);
+    let rows = rows.max(1);
+    let length = if ui.m.plain(length_id).round() <= 0.0 {
+        columns / 2
+    } else {
+        columns
+    };
+    let cell_w = rect.w / columns as f32;
+    let cell_h = rect.h / rows as f32;
+
+    for row in 0..rows {
+        let row_y = rect.y + row as f32 * cell_h;
+        if let Some(label) = labels.get(row) {
+            inst::caption(ui.c, ui.t, rect.x - 82.0, row_y + 3.0, label, false);
+        }
+        if let Some(&id) = enabled_ids.get(row) {
+            let r = Rect::new(rect.x - 36.0, row_y + 2.0, 20.0, (cell_h - 4.0).max(10.0));
+            let value = ui.m.plain(id).round() as i32;
+            let next = if value > 0 { 0 } else { 10000 };
+            let target = Target::Choice(id.to_string(), next);
+            let state = State {
+                on: value > 0,
+                ..ui.state(r, &target)
+            };
+            lemon::plug_button(ui.c, r, 2.0, state);
+            ui.hit(r, target);
+        }
+        for column in 0..columns {
+            let Some(&id) = ids.get(row).and_then(|lane| lane.get(column)) else {
+                continue;
+            };
+            let r = Rect::new(
+                rect.x + column as f32 * cell_w + 1.0,
+                row_y + 1.0,
+                (cell_w - 2.0).max(1.0),
+                (cell_h - 2.0).max(1.0),
+            );
+            if column >= length {
+                ui.c.fill_rrect(r, 2.0, plug::FACE.with_alpha(80));
+                continue;
+            }
+            let value = ui.m.plain(id).round() as i32;
+            let target = Target::Choice(id.into(), if value > 0 { 0 } else { 10000 });
+            let state = State {
+                on: value > 0,
+                ..ui.state(r, &target)
+            };
+            lemon::plug_button(ui.c, r, 2.0, state);
+            if value > 0 {
+                let starts = column == 0 || ui.m.plain(ids[row][column - 1]).round() <= 0.0;
+                let ends = column + 1 >= columns || ui.m.plain(ids[row][column + 1]).round() <= 0.0;
+                if starts {
+                    ui.c.fill_rect(
+                        Rect::new(r.x + 1.0, r.y + 3.0, 2.0, (r.h - 6.0).max(1.0)),
+                        brand::TEXT,
+                    );
+                }
+                if ends {
+                    ui.c.fill_rect(
+                        Rect::new(r.right() - 3.0, r.y + 3.0, 2.0, (r.h - 6.0).max(1.0)),
+                        brand::TEXT,
+                    );
+                }
+            }
+            ui.hit(r, target);
+        }
+        if let Some(&id) = amount_ids.get(row) {
+            mini_fader(ui, id, rect.right() + 16.0, row_y, cell_h);
+        }
+        if let Some(&id) = aux_ids.get(row) {
+            mini_fader(ui, id, rect.right() + 47.0, row_y, cell_h);
+        }
+    }
+
+    for column in (4..columns).step_by(4) {
+        let x = rect.x + column as f32 * cell_w;
+        ui.c.fill_rect(Rect::new(x, rect.y, 1.0, rect.h), RULE.with_alpha(150));
+    }
+    if let Some(column) = ui.st.playhead.filter(|&column| column < length) {
+        let x = rect.x + column as f32 * cell_w;
+        ui.c.stroke_rrect(
+            Rect::new(x + 0.5, rect.y + 0.5, cell_w - 1.0, rect.h - 1.0),
+            2.0,
+            1.5,
+            brand::MAIN,
+        );
+    }
+}
+
+fn mini_fader(ui: &mut Ui, id: &str, x: f32, row_y: f32, row_h: f32) {
+    let track = Rect::new(x, row_y + 3.0, 5.0, (row_h - 6.0).max(8.0));
+    ui.c.fill_rrect(track, 2.0, plug::FIELD_LINE);
+    let value = ui.m.norm(id).clamp(0.0, 1.0);
+    let y = track.bottom() - value * track.h;
+    ui.c.fill_rrect(Rect::new(x - 3.0, y - 2.0, 11.0, 4.0), 2.0, brand::MAIN);
+    ui.hit(track.outset(3.0), Target::Fader(id.into(), 100.0));
 }
 
 /// A tile of a grid (Lemon Chorus's, as the original's): a card, a small dial at the left, the caption on a field at
@@ -363,16 +630,41 @@ fn tile(ui: &mut Ui, id: &str, r: Rect, caption: &str) {
     let target = Target::Knob(id.into());
     let hr = Rect::span(r.x + 2.0, r.right() - 2.0, r.y + 2.0, r.bottom() - 2.0);
     let st = ui.state(hr, &target);
-    lemon::dial(ui.c, cx, cy, rad, 2.8, ui.m.norm(id), false, brand::MAIN, st);
+    lemon::dial(
+        ui.c,
+        cx,
+        cy,
+        rad,
+        2.8,
+        ui.m.norm(id),
+        false,
+        brand::MAIN,
+        st,
+    );
     let x = cx + rad + 10.0;
     let band = Rect::span(x, r.right() - 7.0, r.y + 6.0, r.y + 21.0);
     lemon::field(ui.c, band, State::NORMAL);
     let lh = ui.c.line_height(LABEL);
     let w = lemon::spaced_width(ui.c, LABEL, caption, 1.0);
-    lemon::spaced(ui.c, LABEL, (band.cx() - w / 2.0).round(), (band.cy() - lh / 2.0).round(), plug::DIM, caption, 1.0);
+    lemon::spaced(
+        ui.c,
+        LABEL,
+        (band.cx() - w / 2.0).round(),
+        (band.cy() - lh / 2.0).round(),
+        plug::DIM,
+        caption,
+        1.0,
+    );
     let text = ui.m.text(id);
     let vh = ui.c.line_height(VALUE);
-    ui.c.text_clip(VALUE, x + 4.0, (r.bottom() - 13.0 - vh / 2.0).round(), band.w - 4.0, brand::TEXT, &text);
+    ui.c.text_clip(
+        VALUE,
+        x + 4.0,
+        (r.bottom() - 13.0 - vh / 2.0).round(),
+        band.w - 4.0,
+        brand::TEXT,
+        &text,
+    );
     ui.hit(hr, target);
 }
 
@@ -383,15 +675,34 @@ fn text_field(ui: &mut Ui, id: &str, r: Rect, text: &str, status: &str) {
     let st = ui.state(r, &target);
     lemon::field(ui.c, r, st);
     let vh = ui.c.line_height(VALUE);
-    ui.c.text_clip(VALUE, r.x + 8.0, (r.cy() - vh / 2.0).round(), r.w - 16.0, brand::TEXT, text);
-    ui.c.text_clip(LABEL, r.x + 2.0, r.bottom() + 7.0, r.w - 4.0, plug::DIM, status);
+    ui.c.text_clip(
+        VALUE,
+        r.x + 8.0,
+        (r.cy() - vh / 2.0).round(),
+        r.w - 16.0,
+        brand::TEXT,
+        text,
+    );
+    ui.c.text_clip(
+        LABEL,
+        r.x + 2.0,
+        r.bottom() + 7.0,
+        r.w - 4.0,
+        plug::DIM,
+        status,
+    );
     ui.hit(r, target);
 }
 
 /// The wordmark (as Lemon Delay's): "LIME" in mango beside the effect's name in large grey
 /// capitals, or MANGO over the name (`stacked`), placed by the spec's [`Mark`]; returns where it is.
 fn logo(ui: &mut Ui, spec: &Spec) -> Rect {
-    let Mark { x, y, anchor, stacked } = spec.mark;
+    let Mark {
+        x,
+        y,
+        anchor,
+        stacked,
+    } = spec.mark;
     let ws = lemon::spaced_width(ui.c, MARK_SMALL, "LIME", 2.5);
     let (lh_b, lh_s) = (ui.c.line_height(MARK_BIG), ui.c.line_height(MARK_SMALL));
     if stacked {
@@ -401,7 +712,15 @@ fn logo(ui: &mut Ui, spec: &Spec) -> Rect {
         let left = (x - w * anchor).round();
         let lx = (left + (w - wl) / 2.0).round();
         lemon::spaced(ui.c, MARK_SMALL, lx, y, brand::MAIN, "LIME", 2.5);
-        lemon::spaced(ui.c, MARK_BIG, (left + (w - wn) / 2.0).round(), y + lh_s - 2.0, plug::WORDMARK, spec.word, 2.0);
+        lemon::spaced(
+            ui.c,
+            MARK_BIG,
+            (left + (w - wn) / 2.0).round(),
+            y + lh_s - 2.0,
+            plug::WORDMARK,
+            spec.word,
+            2.0,
+        );
         let r = Rect::span(left - 2.0, left + w + 2.0, y - 2.0, y + lh_s + lh_b - 2.0);
         ui.hit(r, Target::Logo);
         return r;
@@ -411,9 +730,25 @@ fn logo(ui: &mut Ui, spec: &Spec) -> Rect {
     let left = (x - total * anchor).round();
     let right = left + total;
     let bx = (right - wb).round();
-    lemon::spaced(ui.c, MARK_BIG, bx, (y - lh_b / 2.0).round(), plug::WORDMARK, spec.word, 2.0);
+    lemon::spaced(
+        ui.c,
+        MARK_BIG,
+        bx,
+        (y - lh_b / 2.0).round(),
+        plug::WORDMARK,
+        spec.word,
+        2.0,
+    );
     let sx = (bx - 8.0 - ws).round();
-    lemon::spaced(ui.c, MARK_SMALL, sx, (y - lh_s / 2.0).round() + 1.0, brand::MAIN, "LIME", 2.5);
+    lemon::spaced(
+        ui.c,
+        MARK_SMALL,
+        sx,
+        (y - lh_s / 2.0).round() + 1.0,
+        brand::MAIN,
+        "LIME",
+        2.5,
+    );
     let r = Rect::span(left - 2.0, right, y - 12.0, y + 12.0);
     ui.hit(r, Target::Logo);
     r
@@ -427,8 +762,14 @@ fn logo(ui: &mut Ui, spec: &Spec) -> Rect {
 pub fn transfer(c: &mut Canvas, r: Rect, x_max: f32, y_max: f32, f: impl Fn(f32) -> f32) {
     let (cx, cy) = (r.cx(), r.cy());
     let (hw, hh) = (r.w / 2.0 - 6.0, r.h / 2.0 - 6.0);
-    c.fill_rect(Rect::new(r.x + 6.0, cy.round(), r.w - 12.0, 1.0), plug::GRID);
-    c.fill_rect(Rect::new(cx.round(), r.y + 6.0, 1.0, r.h - 12.0), plug::GRID);
+    c.fill_rect(
+        Rect::new(r.x + 6.0, cy.round(), r.w - 12.0, 1.0),
+        plug::GRID,
+    );
+    c.fill_rect(
+        Rect::new(cx.round(), r.y + 6.0, 1.0, r.h - 12.0),
+        plug::GRID,
+    );
     for s in [-1.0f32, 1.0] {
         let y = (cy - s / y_max * hh).round();
         if (y - cy).abs() < hh {
@@ -444,7 +785,11 @@ pub fn transfer(c: &mut Canvas, r: Rect, x_max: f32, y_max: f32, f: impl Fn(f32)
         .map(|i| {
             let x = (i as f32 / n as f32 * 2.0 - 1.0) * x_max;
             let y = f(x);
-            let y = if y.is_finite() { y.clamp(-y_max, y_max) } else { 0.0 };
+            let y = if y.is_finite() {
+                y.clamp(-y_max, y_max)
+            } else {
+                0.0
+            };
             (cx + x / x_max * hw, cy - y / y_max * hh)
         })
         .collect();
@@ -462,7 +807,10 @@ pub fn level_bars(c: &mut Canvas, r: Rect, left: f32, right: f32, top: f32) {
     let x0 = (r.cx() - BAR - gap / 2.0).round();
     let lh = c.line_height(LABEL);
     let unity = (y1 - (y1 - y0) / top).round();
-    c.fill_rect(Rect::span(x0 - 8.0, x0 + 2.0 * BAR + gap + 8.0, unity, unity + 1.0), plug::TICK);
+    c.fill_rect(
+        Rect::span(x0 - 8.0, x0 + 2.0 * BAR + gap + 8.0, unity, unity + 1.0),
+        plug::TICK,
+    );
     for (i, (v, name)) in [(left, "L"), (right, "R")].into_iter().enumerate() {
         let x = x0 + i as f32 * (BAR + gap);
         c.fill_rrect(Rect::span(x, x + BAR, y0, y1), 3.0, plug::TRACK);
@@ -471,7 +819,12 @@ pub fn level_bars(c: &mut Canvas, r: Rect, left: f32, right: f32, top: f32) {
             let col = if v < 0.0 { plug::FAINT } else { brand::MAIN };
             c.fill_rrect(Rect::span(x, x + BAR, y1 - h, y1), 3.0, col);
         }
-        c.text_center(LABEL, Rect::new(x - 8.0, y1 + 4.0, BAR + 16.0, lh), plug::DIM, name);
+        c.text_center(
+            LABEL,
+            Rect::new(x - 8.0, y1 + 4.0, BAR + 16.0, lh),
+            plug::DIM,
+            name,
+        );
     }
 }
 
@@ -480,7 +833,8 @@ pub fn level_bars(c: &mut Canvas, r: Rect, left: f32, right: f32, top: f32) {
 
 /// A setting's hint name.
 pub fn name(spec: &Spec, id: &str) -> String {
-    spec.index(id).map_or_else(|| id.to_string(), |k| spec.settings[k].name.to_string())
+    spec.index(id)
+        .map_or_else(|| id.to_string(), |k| spec.settings[k].name.to_string())
 }
 
 /// The hint line for a target.

@@ -32,16 +32,16 @@ pub mod phaser;
 pub mod soft_clipper;
 pub mod stereo_enhancer;
 pub mod stereo_shaper;
-pub mod twelve;
 pub mod ticks;
 pub mod transient_processor;
+pub mod twelve;
 pub mod view;
 pub mod vocoder;
 
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use nih_plug::prelude::*;
 use os_ui::{Canvas, Color, Rect};
@@ -49,7 +49,7 @@ use os_ui::{Canvas, Color, Rect};
 use params::FxParams;
 
 /// The most settings an effect here has.
-pub const MAX: usize = 28;
+pub const MAX: usize = 400;
 
 /// One setting: the original's saved state holds it as int `k` (its place in [`Spec::settings`], unless
 /// [`Spec::fields`] maps it).
@@ -70,25 +70,73 @@ pub struct Setting {
 pub enum Control {
     /// A Pith dial of radius `r` centred at (`cx`, `cy`), its caption under it (the value text, in lemon, when the
     /// caption is empty).
-    Knob { id: &'static str, cx: f32, cy: f32, r: f32, caption: &'static str, bipolar: bool },
+    Knob {
+        id: &'static str,
+        cx: f32,
+        cy: f32,
+        r: f32,
+        caption: &'static str,
+        bipolar: bool,
+    },
     /// A radio list: one row per value from the range's minimum, 16 px apart from `top`, a toggle at `x` and the name
     /// beside it.
-    Choice { id: &'static str, x: f32, top: f32, names: &'static [&'static str] },
+    Choice {
+        id: &'static str,
+        x: f32,
+        top: f32,
+        names: &'static [&'static str],
+    },
     /// A vertical fader over `top..bot` at `x`, its fill in `col` from the bottom (from the middle when `bipolar`),
     /// `label` over it and ticks at `marks` (normalised).
-    Fader { id: &'static str, x: f32, top: f32, bot: f32, label: &'static str, col: Color, bipolar: bool, marks: &'static [f32] },
+    Fader {
+        id: &'static str,
+        x: f32,
+        top: f32,
+        bot: f32,
+        label: &'static str,
+        col: Color,
+        bipolar: bool,
+        marks: &'static [f32],
+    },
     /// A button centred at (`cx`, `cy`) that shows the value's envelope shape; a click steps to the next value.
     Shape { id: &'static str, cx: f32, cy: f32 },
     /// A small switch box centred at (`cx`, `cy`) that steps between the range's two ends on click, lit mango on
     /// the range's top (Lime 12's crush).
     Switch { id: &'static str, cx: f32, cy: f32 },
+    /// A compact matrix of binary settings with a lane label, enable switch, and two lane controls per row.
+    StepGrid {
+        ids: &'static [&'static [&'static str]],
+        labels: &'static [&'static str],
+        enabled_ids: &'static [&'static str],
+        amount_ids: &'static [&'static str],
+        aux_ids: &'static [&'static str],
+        columns: usize,
+        rows: usize,
+        length_id: &'static str,
+        rect: Rect,
+    },
     /// A tile (Lemon Chorus's grid): its own card over `x0..x1`, `y0..y1`, a small dial at the left, the caption in a
     /// field at the top right and the value text under it.
-    Tile { id: &'static str, x0: f32, y0: f32, x1: f32, y1: f32, caption: &'static str },
+    Tile {
+        id: &'static str,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        caption: &'static str,
+    },
     /// A line of text kept in the saved state, not a parameter (Lemon Formula Controller's formula): a field over
     /// `x0..x1`, `y0..y1` showing the text, a status line under it. `show` reads the text and the status from the saved
     /// state, `edit` gives the saved state with a typed text. A click opens the type-in box on it.
-    Text { id: &'static str, x0: f32, y0: f32, x1: f32, y1: f32, show: fn(&[u8]) -> (String, String), edit: fn(&[u8], &str) -> Vec<u8> },
+    Text {
+        id: &'static str,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        show: fn(&[u8]) -> (String, String),
+        edit: fn(&[u8], &str) -> Vec<u8>,
+    },
 }
 
 impl Control {
@@ -101,6 +149,36 @@ impl Control {
             | Control::Switch { id, .. }
             | Control::Tile { id, .. }
             | Control::Text { id, .. } => id,
+            Control::StepGrid { ids, .. } => ids
+                .first()
+                .and_then(|row| row.first())
+                .copied()
+                .unwrap_or(""),
+        }
+    }
+
+    pub fn contains_id(&self, id: &str) -> bool {
+        match self {
+            Control::StepGrid {
+                ids,
+                enabled_ids,
+                amount_ids,
+                aux_ids,
+                ..
+            } => {
+                ids.iter().any(|row| row.contains(&id))
+                    || enabled_ids.contains(&id)
+                    || amount_ids.contains(&id)
+                    || aux_ids.contains(&id)
+            }
+            _ => self.id() == id,
+        }
+    }
+
+    pub fn is_step_cell(&self, id: &str) -> bool {
+        match self {
+            Control::StepGrid { ids, .. } => ids.iter().any(|row| row.contains(&id)),
+            _ => false,
         }
     }
 }
@@ -218,13 +296,18 @@ pub trait Kind: 'static + Send + Sync {
 /// What the audio thread and the editor share.
 pub struct Shared {
     pub rate: AtomicU32,
+    pub playhead: AtomicU32,
     /// Set while an editor is open.
     pub editor_open: AtomicBool,
 }
 
 impl Default for Shared {
     fn default() -> Self {
-        Shared { rate: AtomicU32::new(44100), editor_open: AtomicBool::new(false) }
+        Shared {
+            rate: AtomicU32::new(44100),
+            playhead: AtomicU32::new(u32::MAX),
+            editor_open: AtomicBool::new(false),
+        }
     }
 }
 
@@ -279,8 +362,11 @@ impl<K: Kind> Plugin for SmallFx<K> {
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] =
-        &[AudioIOLayout { main_input_channels: NonZeroU32::new(2), main_output_channels: NonZeroU32::new(2), ..AudioIOLayout::const_default() }];
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+        ..AudioIOLayout::const_default()
+    }];
     const SAMPLE_ACCURATE_AUTOMATION: bool = false;
 
     type SysExMessage = ();
@@ -291,10 +377,19 @@ impl<K: Kind> Plugin for SmallFx<K> {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        Some(Box::new(editor::FxEditor::new(K::SPEC, self.params.clone(), self.shared.clone())))
+        Some(Box::new(editor::FxEditor::new(
+            K::SPEC,
+            self.params.clone(),
+            self.shared.clone(),
+        )))
     }
 
-    fn initialize(&mut self, _layout: &AudioIOLayout, config: &BufferConfig, _ctx: &mut impl InitContext<Self>) -> bool {
+    fn initialize(
+        &mut self,
+        _layout: &AudioIOLayout,
+        config: &BufferConfig,
+        _ctx: &mut impl InitContext<Self>,
+    ) -> bool {
         let rate = config.sample_rate.round() as u32;
         self.shared.rate.store(rate, Ordering::Relaxed);
         self.raw_seen = u64::MAX;
@@ -316,9 +411,16 @@ impl<K: Kind> Plugin for SmallFx<K> {
         }
     }
 
-    fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, _ctx: &mut impl ProcessContext<Self>) -> ProcessStatus {
+    fn process(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        _ctx: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
         let s = self.settings();
-        let Some(dsp) = &mut self.dsp else { return ProcessStatus::Normal };
+        let Some(dsp) = &mut self.dsp else {
+            return ProcessStatus::Normal;
+        };
         dsp.set(&s[..K::SPEC.settings.len()]);
         let out = buffer.as_slice();
         if out.len() < 2 {
@@ -326,7 +428,11 @@ impl<K: Kind> Plugin for SmallFx<K> {
         }
         let (left, right) = out.split_at_mut(1);
         dsp.process(left[0], right[0]);
-        if K::SPEC.rings { ProcessStatus::KeepAlive } else { ProcessStatus::Normal }
+        if K::SPEC.rings {
+            ProcessStatus::KeepAlive
+        } else {
+            ProcessStatus::Normal
+        }
     }
 }
 
@@ -372,15 +478,32 @@ mod tests {
             assert!(s.settings.len() <= MAX, "{}", s.name);
             for (k, set) in s.settings.iter().enumerate() {
                 assert_eq!(s.index(set.id), Some(k), "{} {}", s.name, set.id);
-                assert!((set.range.0..=set.range.1).contains(&set.start), "{} {}", s.name, set.id);
+                assert!(
+                    (set.range.0..=set.range.1).contains(&set.start),
+                    "{} {}",
+                    s.name,
+                    set.id
+                );
                 if let Some(m) = set.magnet {
-                    assert!((set.range.0..=set.range.1).contains(&m), "{} {}", s.name, set.id);
+                    assert!(
+                        (set.range.0..=set.range.1).contains(&m),
+                        "{} {}",
+                        s.name,
+                        set.id
+                    );
                 }
-                assert_eq!(s.controls.iter().filter(|c| c.id() == set.id).count(), 1, "{} {}", s.name, set.id);
+                assert_eq!(
+                    s.controls.iter().filter(|c| c.contains_id(set.id)).count(),
+                    1,
+                    "{} {}",
+                    s.name,
+                    set.id
+                );
                 // Every value has a text, and typing it in gives a value with the same text.
                 for v in set.range.0..=set.range.1 {
                     let t = (s.text)(k, v);
-                    let back = (s.parse)(k, &t).unwrap_or_else(|| panic!("{} {} {v}: {t}", s.name, set.id));
+                    let back = (s.parse)(k, &t)
+                        .unwrap_or_else(|| panic!("{} {} {v}: {t}", s.name, set.id));
                     assert_eq!((s.text)(k, back), t, "{} {} {v}", s.name, set.id);
                 }
             }
@@ -433,7 +556,10 @@ mod tests {
         // A stored threshold of 0 (below the knob's 1) plays as stored while the knob is not moved.
         let q = FxParams::new(soft_clipper::SPEC);
         q.set_raw(vec![0, 0, 0, 0, 128, 0, 0, 0]);
-        let mut p = soft_clipper::LemonSoftClipper { params: Arc::new(q), ..Default::default() };
+        let mut p = soft_clipper::LemonSoftClipper {
+            params: Arc::new(q),
+            ..Default::default()
+        };
         // The parameter is at its start (100), the stored field (0) differs: the parameter wins (it was edited).
         assert_eq!(p.settings()[0], 100);
         let id = p.params.p[0].as_ptr();
@@ -446,7 +572,8 @@ mod tests {
     /// plugins/factory-presets.md).
     #[test]
     fn factory_presets_list_every_parameter_and_hold_fls_states() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/os-app/factory-presets");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/os-app/factory-presets");
         // Every preset of a plugin, as `[category/]name`.
         let all = |spec: &Spec| -> Vec<String> {
             let mut names = Vec::new();
@@ -465,25 +592,47 @@ mod tests {
             names
         };
         let read = |spec: &Spec, preset: &str| -> Vec<i32> {
-            let text = std::fs::read_to_string(root.join(spec.name).join(format!("{preset}.ospreset"))).unwrap();
+            let text =
+                std::fs::read_to_string(root.join(spec.name).join(format!("{preset}.ospreset")))
+                    .unwrap();
             let mut lines = text.lines();
             assert_eq!(lines.next(), Some("OSPRESET 1"));
             let head = lines.next().unwrap();
-            assert!(head.starts_with(&format!("plugin={}	", spec.name)), "{head}");
+            assert!(
+                head.starts_with(&format!("plugin={}	", spec.name)),
+                "{head}"
+            );
             let mut v: Vec<Option<i32>> = vec![None; spec.settings.len()];
             for l in lines.filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
                 let (name, steps) = l.split_once(" = ").unwrap();
-                let k = spec.settings.iter().position(|s| s.name == name).unwrap_or_else(|| panic!("{}: {name}", spec.name));
+                let k = spec
+                    .settings
+                    .iter()
+                    .position(|s| s.name == name)
+                    .unwrap_or_else(|| panic!("{}: {name}", spec.name));
                 let (min, max) = spec.settings[k].range;
                 let steps: i32 = steps.parse().unwrap();
-                assert!((0..=max - min).contains(&steps), "{} {preset}: {name} = {steps}", spec.name);
+                assert!(
+                    (0..=max - min).contains(&steps),
+                    "{} {preset}: {name} = {steps}",
+                    spec.name
+                );
                 v[k] = Some(min + steps);
             }
-            v.into_iter().map(|x| x.expect("every parameter listed")).collect()
+            v.into_iter()
+                .map(|x| x.expect("every parameter listed"))
+                .collect()
         };
-        for spec in
-            [soft_clipper::SPEC, fast_distortion::SPEC, stereo_enhancer::SPEC, transient_processor::SPEC, chorus::SPEC, stereo_shaper::SPEC, filter::SPEC, twelve::SPEC]
-        {
+        for spec in [
+            soft_clipper::SPEC,
+            fast_distortion::SPEC,
+            stereo_enhancer::SPEC,
+            transient_processor::SPEC,
+            chorus::SPEC,
+            stereo_shaper::SPEC,
+            filter::SPEC,
+            twelve::SPEC,
+        ] {
             for name in all(spec) {
                 read(spec, &name);
             }
@@ -494,24 +643,65 @@ mod tests {
             }
             assert_eq!(read(spec, "Default"), start, "{}", spec.name);
         }
-        assert_eq!(read(fast_distortion::SPEC, "Compressor"), [192, 1, 0, 104, 93]);
+        assert_eq!(
+            read(fast_distortion::SPEC, "Compressor"),
+            [192, 1, 0, 104, 93]
+        );
         assert_eq!(read(fast_distortion::SPEC, "Warmth"), [82, 7, 0, 128, 128]);
-        assert_eq!(read(stereo_enhancer::SPEC, "For strings"), [-18, 256, -54, -248, 1, 0]);
-        assert_eq!(read(stereo_enhancer::SPEC, "Subtle"), [0, 256, -40, -24, 1, 0]);
-        assert_eq!(read(transient_processor::SPEC, "Overdriven"), [120, 110, 160, 53, 2, 1, 50, 80, 1]);
-        assert_eq!(read(transient_processor::SPEC, "Subtle attack"), [132, 0, 80, 80, 0, 1, 0, 80, 1]);
-        assert_eq!(std::fs::read_dir(root.join(transient_processor::SPEC.name)).unwrap().count(), 10);
-        assert_eq!(read(chorus::SPEC, "Detune"), [40, 4375, 149, 3229, 0, 781, 587, 0, 1024, 65, 4531, 491]);
-        assert_eq!(read(chorus::SPEC, "Ensemble"), [115, 3669, 0, 1458, 0, 0, 0, 0, 0, 0, 1719, 0]);
+        assert_eq!(
+            read(stereo_enhancer::SPEC, "For strings"),
+            [-18, 256, -54, -248, 1, 0]
+        );
+        assert_eq!(
+            read(stereo_enhancer::SPEC, "Subtle"),
+            [0, 256, -40, -24, 1, 0]
+        );
+        assert_eq!(
+            read(transient_processor::SPEC, "Overdriven"),
+            [120, 110, 160, 53, 2, 1, 50, 80, 1]
+        );
+        assert_eq!(
+            read(transient_processor::SPEC, "Subtle attack"),
+            [132, 0, 80, 80, 0, 1, 0, 80, 1]
+        );
+        assert_eq!(
+            std::fs::read_dir(root.join(transient_processor::SPEC.name))
+                .unwrap()
+                .count(),
+            10
+        );
+        assert_eq!(
+            read(chorus::SPEC, "Detune"),
+            [40, 4375, 149, 3229, 0, 781, 587, 0, 1024, 65, 4531, 491]
+        );
+        assert_eq!(
+            read(chorus::SPEC, "Ensemble"),
+            [115, 3669, 0, 1458, 0, 0, 0, 0, 0, 0, 1719, 0]
+        );
         assert_eq!(all(chorus::SPEC).len(), 8);
         // The Stereo Shaper's presets without the difference output (it has no parameter): FL's 21 of 25.
-        assert_eq!(read(stereo_shaper::SPEC, "Mixing/LR to MS"), [8076, 8076, -8076, 8076, 0, 0, 1]);
-        assert_eq!(read(stereo_shaper::SPEC, "Effects/Stereoize 3"), [0, 12800, 12800, 0, 1408, -2496, 1]);
-        assert_eq!(read(stereo_shaper::SPEC, "Effects/Narrow"), [8176, 12800, 12800, 8076, -1952, 0, 0]);
+        assert_eq!(
+            read(stereo_shaper::SPEC, "Mixing/LR to MS"),
+            [8076, 8076, -8076, 8076, 0, 0, 1]
+        );
+        assert_eq!(
+            read(stereo_shaper::SPEC, "Effects/Stereoize 3"),
+            [0, 12800, 12800, 0, 1408, -2496, 1]
+        );
+        assert_eq!(
+            read(stereo_shaper::SPEC, "Effects/Narrow"),
+            [8176, 12800, 12800, 8076, -1952, 0, 0]
+        );
         assert_eq!(all(stereo_shaper::SPEC).len(), 21);
         // FL's four, Center on in each.
-        assert_eq!(read(filter::SPEC, "Party next door"), [160, 1024, 864, 0, 0, 0, 1]);
-        assert_eq!(read(filter::SPEC, "Tiny speakers"), [544, 0, 0, 1024, 464, 1, 1]);
+        assert_eq!(
+            read(filter::SPEC, "Party next door"),
+            [160, 1024, 864, 0, 0, 0, 1]
+        );
+        assert_eq!(
+            read(filter::SPEC, "Tiny speakers"),
+            [544, 0, 0, 1024, 464, 1, 1]
+        );
         assert_eq!(all(filter::SPEC).len(), 4);
         // FL's 27 Flanger and 27 Phaser presets. Their Default presets are not what a new instance holds: the Flanger's has
         // the phase at 119 and the feedback at 24 (a new one 118 and 23), the Phaser's is a slower, all-wet sweep.
@@ -522,10 +712,24 @@ mod tests {
             assert_eq!(all(spec).len(), 27, "{}", spec.name);
         }
         let mut start = flanger::SPEC.start();
-        (start[os_engine::effects::flanger::PHASE], start[os_engine::effects::flanger::FEED]) = (119, 24);
+        (
+            start[os_engine::effects::flanger::PHASE],
+            start[os_engine::effects::flanger::FEED],
+        ) = (119, 24);
         assert_eq!(read(flanger::SPEC, "Default"), start);
-        assert_eq!(read(flanger::SPEC, "Rotary"), [597, 938, 4740, 165, 4010, 501, 82, 629, 747, 4323, 3281, 4323]);
-        assert_eq!(read(phaser::SPEC, "Default"), [1500, 0, 900, 0, 512, 11, 693, 0, 2500]);
-        assert_eq!(read(phaser::SPEC, "Whale song"), [547, 953, 1000, 1024, 512, 22, 990, 0, 3047]);
+        assert_eq!(
+            read(flanger::SPEC, "Rotary"),
+            [
+                597, 938, 4740, 165, 4010, 501, 82, 629, 747, 4323, 3281, 4323
+            ]
+        );
+        assert_eq!(
+            read(phaser::SPEC, "Default"),
+            [1500, 0, 900, 0, 512, 11, 693, 0, 2500]
+        );
+        assert_eq!(
+            read(phaser::SPEC, "Whale song"),
+            [547, 953, 1000, 1024, 512, 22, 990, 0, 3047]
+        );
     }
 }

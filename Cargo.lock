@@ -2073,6 +2073,7 @@ dependencies = [
  "lemon-small-fx",
  "nih_plug",
  "os-plugkit",
+ "os-ui",
 ]
 
 [[package]]
