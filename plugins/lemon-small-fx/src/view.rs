@@ -550,6 +550,25 @@ fn step_grid(
             lemon::plug_button(ui.c, r, 2.0, state);
             ui.hit(r, target);
         }
+        let lane_rect = Rect::new(
+            rect.x,
+            row_y + 2.0,
+            cell_w * length as f32,
+            (cell_h - 4.0).max(1.0),
+        );
+        ui.c.fill_rrect(lane_rect, 3.0, plug::TRACK);
+        if length < columns {
+            ui.c.fill_rrect(
+                Rect::new(
+                    rect.x + cell_w * length as f32,
+                    row_y + 2.0,
+                    cell_w * (columns - length) as f32,
+                    (cell_h - 4.0).max(1.0),
+                ),
+                3.0,
+                plug::FACE.with_alpha(80),
+            );
+        }
         for column in 0..columns {
             let Some(&id) = ids.get(row).and_then(|lane| lane.get(column)) else {
                 continue;
@@ -561,33 +580,51 @@ fn step_grid(
                 (cell_h - 2.0).max(1.0),
             );
             if column >= length {
-                ui.c.fill_rrect(r, 2.0, plug::FACE.with_alpha(80));
                 continue;
             }
             let value = ui.m.plain(id).round() as i32;
             let target = Target::Choice(id.into(), if value > 0 { 0 } else { 10000 });
-            let state = State {
-                on: value > 0,
-                ..ui.state(r, &target)
-            };
-            lemon::plug_button(ui.c, r, 2.0, state);
-            if value > 0 {
-                let starts = column == 0 || ui.m.plain(ids[row][column - 1]).round() <= 0.0;
-                let ends = column + 1 >= columns || ui.m.plain(ids[row][column + 1]).round() <= 0.0;
-                if starts {
-                    ui.c.fill_rect(
-                        Rect::new(r.x + 1.0, r.y + 3.0, 2.0, (r.h - 6.0).max(1.0)),
-                        brand::TEXT,
-                    );
-                }
-                if ends {
-                    ui.c.fill_rect(
-                        Rect::new(r.right() - 3.0, r.y + 3.0, 2.0, (r.h - 6.0).max(1.0)),
-                        brand::TEXT,
-                    );
-                }
+            let state = ui.state(r, &target);
+            if state.hover || state.pressed {
+                ui.c.stroke_rrect(
+                    r.outset(-1.0),
+                    2.0,
+                    1.0,
+                    brand::TEXT.with_alpha(180),
+                );
             }
             ui.hit(r, target);
+        }
+        let mut column = 0;
+        while column < length {
+            if ui.m.plain(ids[row][column]).round() <= 0.0 {
+                column += 1;
+                continue;
+            }
+            let start = column;
+            while column + 1 < length
+                && ui.m.plain(ids[row][column + 1]).round() > 0.0
+            {
+                column += 1;
+            }
+            let end = column;
+            let clip = Rect::new(
+                rect.x + start as f32 * cell_w + 1.0,
+                row_y + 3.0,
+                ((end - start + 1) as f32 * cell_w - 2.0).max(1.0),
+                (cell_h - 6.0).max(1.0),
+            );
+            ui.c.fill_rrect(clip, 3.0, brand::MAIN.with_alpha(220));
+            ui.c.stroke_rrect(clip, 3.0, 1.0, brand::TEXT.with_alpha(150));
+            let grip_h = (clip.h - 6.0).max(4.0);
+            for grip_x in [clip.x + 3.0, clip.right() - 6.0] {
+                ui.c.fill_rrect(
+                    Rect::new(grip_x, clip.cy() - grip_h / 2.0, 3.0, grip_h),
+                    1.5,
+                    plug::BG,
+                );
+            }
+            column += 1;
         }
         if let Some(&id) = amount_ids.get(row) {
             mini_fader(ui, id, rect.right() + 16.0, row_y, cell_h);
