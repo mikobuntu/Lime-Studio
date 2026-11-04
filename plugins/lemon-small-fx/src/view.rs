@@ -173,6 +173,34 @@ struct Ui<'a> {
     m: &'a dyn Model,
     st: &'a ViewState,
     hits: Vec<Hit>,
+    accent: Color,
+}
+
+/// A lane's hue: the rows spread over the spectrum from red to magenta, 30 degrees apart (11 lanes).
+fn lane_color(row: usize) -> Color {
+    let h = (row % 11) as f32 * 30.0 / 60.0;
+    let (s, v) = (0.83f32, 1.0f32);
+    let f = h - h.floor();
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    let (r, g, b) = match h.floor() as u32 % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    let byte = |x: f32| (x * 255.0).round() as u32;
+    let hue = Color::rgb(byte(r) << 16 | byte(g) << 8 | byte(b));
+    // Pure blue and violet read dark on the grey background.
+    if (8..=9).contains(&(row % 11)) { hue.mix(Color::rgb(0xffffff), 0.3) } else { hue }
+}
+
+/// A lane's small button: a translucent fill and a bright outline in the lane's hue; `on` brightens the fill.
+fn lane_button(c: &mut Canvas, r: Rect, hue: Color, on: bool, hover: bool) {
+    let fill = if on { 110 } else if hover { 60 } else { 28 };
+    c.fill_rrect(r, 3.0, hue.with_alpha(fill));
+    c.stroke_rrect(r.inset(1.0), 2.0, 2.0, hue.with_alpha(if on { 255 } else { 150 }));
 }
 
 impl Ui<'_> {
@@ -217,9 +245,13 @@ pub fn paint(
         m,
         st,
         hits: Vec::new(),
+        accent: brand::MAIN,
     };
     ui.c.begin_frame(None);
     ui.c.clear(plug::BG);
+    if spec.controls.iter().any(|c| matches!(c, Control::StepGrid { .. })) {
+        ui.accent = lane_color(ui.st.selected);
+    }
     for card in spec.cards {
         lemon::plug_panel(ui.c, Rect::span(card.x0, card.x1, card.y0, card.y1));
         if !card.heading.is_empty() {
@@ -368,7 +400,7 @@ fn knob(ui: &mut Ui, id: &str, cx: f32, cy: f32, r: f32, cap: &str, bipolar: boo
         if r > SMALL { 3.2 } else { 2.8 },
         ui.m.norm(id),
         bipolar,
-        brand::MAIN,
+        ui.accent,
         st,
     );
     if cap.is_empty() {
@@ -377,7 +409,7 @@ fn knob(ui: &mut Ui, id: &str, cx: f32, cy: f32, r: f32, cap: &str, bipolar: boo
         ui.c.text_center(
             LABEL,
             Rect::new(cx - 50.0, cy + r + 6.0, 100.0, lh),
-            brand::MAIN,
+            ui.accent,
             &text,
         );
     } else {
@@ -398,9 +430,15 @@ fn choices(ui: &mut Ui, id: &str, x: f32, top: f32, min: i32, names: &[&str]) {
         let w = ui.c.text_width(LABEL, name);
         let r = Rect::span(x - 2.0, (x + 20.0 + w).ceil(), y, y + 15.0);
         let st = ui.state(r, &target);
-        lemon::toggle(ui.c, x + 6.0, y + 7.5, chosen == v, st);
+        if ui.accent != brand::MAIN && chosen == v {
+            let dot = Rect::new(x, y + 1.5, 12.0, 12.0);
+            ui.c.fill_rrect(dot, 4.0, ui.accent.with_alpha(64));
+            ui.c.stroke_rrect(dot.inset(1.0), 3.0, 2.0, ui.accent);
+        } else {
+            lemon::toggle(ui.c, x + 6.0, y + 7.5, chosen == v, st);
+        }
         let ink = if chosen == v {
-            brand::MAIN
+            ui.accent
         } else if st.hover {
             brand::TEXT
         } else {
@@ -538,17 +576,15 @@ fn step_grid(
         let selected = ui.st.selected == row;
         let target = Target::Lane(row);
         let r = Rect::new(rect.x - 184.0, row_y + 2.0, 18.0, (cell_h - 4.0).max(10.0));
-        let state = State {
-            on: selected,
-            ..ui.state(r, &target)
-        };
-        let ink = lemon::plug_button(ui.c, r, 2.0, state);
-        ui.c.text_center(LABEL, Rect::new(r.x, r.cy() - lh / 2.0, r.w, lh), ink, ">");
+        let hue = lane_color(row);
+        let state = ui.state(r, &target);
+        lane_button(ui.c, r, hue, selected, state.hover || state.pressed);
+        ui.c.text_center(LABEL, Rect::new(r.x, r.cy() - lh / 2.0, r.w, lh), hue, ">");
         ui.hit(r, target);
         if let Some(label) = labels.get(row) {
             let w = inst::caption_width(ui.c, label, inst::CAPTION_TRACK);
             let x = (rect.x - 160.0 + 62.0 - w / 2.0).max(rect.x - 160.0);
-            let ink = if selected { brand::MAIN } else { plug::DIM };
+            let ink = if selected { lane_color(row) } else { lane_color(row).with_alpha(170) };
             inst::caption_at(
                 ui.c,
                 x.round(),
@@ -563,11 +599,8 @@ fn step_grid(
             let value = ui.m.plain(id).round() as i32;
             let next = if value > 0 { 0 } else { 10000 };
             let target = Target::Choice(id.to_string(), next);
-            let state = State {
-                on: value > 0,
-                ..ui.state(r, &target)
-            };
-            lemon::plug_button(ui.c, r, 2.0, state);
+            let state = ui.state(r, &target);
+            lane_button(ui.c, r, lane_color(row), value > 0, state.hover || state.pressed);
             ui.hit(r, target);
         }
         let lane_rect = Rect::new(
@@ -627,14 +660,15 @@ fn step_grid(
                 ((end - start + 1) as f32 * cell_w - 2.0).max(1.0),
                 (cell_h - 6.0).max(1.0),
             );
-            ui.c.fill_rrect(clip, 3.0, brand::MAIN.with_alpha(220));
-            ui.c.stroke_rrect(clip, 3.0, 1.0, brand::TEXT.with_alpha(150));
+            let hue = lane_color(row);
+            ui.c.fill_rrect(clip, 3.0, hue.with_alpha(64));
+            ui.c.stroke_rrect(clip.inset(1.0), 2.0, 2.0, hue);
             let grip_h = (clip.h - 6.0).max(4.0);
-            for grip_x in [clip.x + 3.0, clip.right() - 6.0] {
+            for grip_x in [clip.x + 4.0, clip.right() - 7.0] {
                 ui.c.fill_rrect(
                     Rect::new(grip_x, clip.cy() - grip_h / 2.0, 3.0, grip_h),
                     1.5,
-                    plug::BG,
+                    hue.with_alpha(200),
                 );
             }
             column += 1;
@@ -651,7 +685,7 @@ fn step_grid(
             Rect::new(x + 0.5, rect.y + 0.5, cell_w - 1.0, rect.h - 1.0),
             2.0,
             1.5,
-            brand::MAIN,
+            brand::TEXT,
         );
     }
 }
@@ -670,6 +704,7 @@ fn panel(ui: &mut Ui, spec: &Spec, lanes: &[PanelLane], rect: Rect) {
         &format!("{} CONTROLS", lane.label.to_uppercase()),
     );
     let mut x = rect.x + 16.0;
+    ui.accent = lane_color(ui.st.selected.min(lanes.len().saturating_sub(1)));
     for item in lane.items {
         if let PanelKind::Choice { names } = item.kind {
             let min = spec.index(item.id).map_or(0, |k| spec.settings[k].range.0);
@@ -700,7 +735,7 @@ fn panel(ui: &mut Ui, spec: &Spec, lanes: &[PanelLane], rect: Rect) {
             ui.c.text_center(
                 LABEL,
                 Rect::new(cx - 44.0, rect.y + 38.0 + 16.0 + 22.0, 88.0, lh),
-                brand::MAIN,
+                ui.accent,
                 &text,
             );
             cx += 88.0;
@@ -798,7 +833,7 @@ fn logo(ui: &mut Ui, spec: &Spec) -> Rect {
         let w = wn.max(wl);
         let left = (x - w * anchor).round();
         let lx = (left + (w - wl) / 2.0).round();
-        lemon::spaced(ui.c, MARK_SMALL, lx, y, brand::MAIN, "LIME", 2.5);
+        lemon::spaced(ui.c, MARK_SMALL, lx, y, ui.accent, "LIME", 2.5);
         lemon::spaced(
             ui.c,
             MARK_BIG,
@@ -832,7 +867,7 @@ fn logo(ui: &mut Ui, spec: &Spec) -> Rect {
         MARK_SMALL,
         sx,
         (y - lh_s / 2.0).round() + 1.0,
-        brand::MAIN,
+        ui.accent,
         "LIME",
         2.5,
     );
