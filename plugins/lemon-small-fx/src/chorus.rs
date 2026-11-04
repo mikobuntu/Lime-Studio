@@ -17,7 +17,13 @@ use crate::params::{leading_number, nearest_rising};
 use crate::{Control, Kind, Mark, Setting, SmallFx, Sound, Spec};
 
 const fn setting(id: &'static str, name: &'static str, k: usize) -> Setting {
-    Setting { id, name, range: dsp::RANGES[k], start: dsp::DEFAULTS[k], magnet: None }
+    Setting {
+        id,
+        name,
+        range: dsp::RANGES[k],
+        start: dsp::DEFAULTS[k],
+        magnet: None,
+    }
 }
 
 /// The settings in the original's order (spec §5).
@@ -39,11 +45,23 @@ pub const SETTINGS: [Setting; dsp::PARAMS] = [
 /// Editor layout (spec §2), as the original's: a grid of tiles, three across and four down.
 const fn tile(id: &'static str, col: usize, row: usize, caption: &'static str) -> Control {
     let (x0, y0) = (8.0 + 164.0 * col as f32, 8.0 + 52.0 * row as f32);
-    Control::Tile { id, x0, y0, x1: x0 + 158.0, y1: y0 + 46.0, caption }
+    Control::Tile {
+        id,
+        x0,
+        y0,
+        x1: x0 + 158.0,
+        y1: y0 + 46.0,
+        caption,
+    }
 }
 
 /// The stored value of each wave's lowest setting, and the top for the last (the typed-in names).
-pub const WAVES: &[(&str, i32)] = &[("ARC", 0), ("SHARP ARC", 342), ("SINES", 683), ("SHARP SINES", 1024)];
+pub const WAVES: &[(&str, i32)] = &[
+    ("ARC", 0),
+    ("SHARP ARC", 342),
+    ("SINES", 683),
+    ("SHARP SINES", 1024),
+];
 
 const CONTROLS: [Control; 12] = [
     tile("delay", 0, 0, "DELAY"),
@@ -75,7 +93,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &[],
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: 494.0, y: 229.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: 494.0,
+        y: 229.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(Rect::new(8.0, 218.0, 486.0, 22.0)),
     labels: &[],
     text,
@@ -152,7 +175,11 @@ fn parse(k: usize, s: &str) -> Option<i32> {
         }
         dsp::CROSS_CUTOFF => {
             let x = leading_number(&low)?;
-            Some(nearest_rising(range, if low.contains('k') { x * 1000.0 } else { x }, cutoff_hz))
+            Some(nearest_rising(
+                range,
+                if low.contains('k') { x * 1000.0 } else { x },
+                cutoff_hz,
+            ))
         }
         dsp::WET_ONLY => match low.as_str() {
             "on" | "yes" => Some(range.1),
@@ -173,12 +200,16 @@ fn parse(k: usize, s: &str) -> Option<i32> {
             };
             Some(WAVES[at].1)
         }
-        k => Some(nearest_rising(range, leading_number(&low)?, |v| speed_hz(k, v))),
+        k => Some(nearest_rising(range, leading_number(&low)?, |v| {
+            speed_hz(k, v)
+        })),
     }
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 struct ChorusSound(Chorus);
@@ -210,9 +241,14 @@ impl Kind for ChorusKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-chorus";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's chorus";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Chorus, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Chorus,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioChrus";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Modulation];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Modulation];
 }
 
 pub type LemonChorus = SmallFx<ChorusKind>;
@@ -264,7 +300,8 @@ mod tests {
         let mut s = sound(48000, &v);
         let mut c = Chorus::with_settings(48000, &settings(&v));
         let input = |i: usize| ((i as f32) * 0.031).sin() * 0.5;
-        let (mut l, mut r): (Vec<f32>, Vec<f32>) = (0..1500).map(|i| (input(i), -input(i + 7))).unzip();
+        let (mut l, mut r): (Vec<f32>, Vec<f32>) =
+            (0..1500).map(|i| (input(i), -input(i + 7))).unzip();
         let (mut l2, mut r2) = (l.clone(), r.clone());
         s.process(&mut l, &mut r);
         c.process(&mut l2, &mut r2);

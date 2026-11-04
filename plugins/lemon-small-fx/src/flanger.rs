@@ -17,7 +17,13 @@ use crate::params::{db_text_fine, leading_number, nearest_rising, parse_db_risin
 use crate::{Control, Kind, Mark, Setting, SmallFx, Sound, Spec};
 
 const fn setting(id: &'static str, name: &'static str, k: usize) -> Setting {
-    Setting { id, name, range: dsp::RANGES[k], start: dsp::DEFAULTS[k], magnet: None }
+    Setting {
+        id,
+        name,
+        range: dsp::RANGES[k],
+        start: dsp::DEFAULTS[k],
+        magnet: None,
+    }
 }
 
 /// The settings in the original's order (spec §5).
@@ -50,8 +56,18 @@ const H: f32 = BAND_Y + BAND_H + GAP;
 
 /// Tile `(col, row)`: `Control::Tile` takes end-inclusive edges, so the last pixel is `x0 + TILE_W - 1`.
 const fn tile(id: &'static str, col: usize, row: usize, caption: &'static str) -> Control {
-    let (x0, y0) = (GAP + (TILE_W + GAP) * col as f32, GAP + (TILE_H + GAP) * row as f32);
-    Control::Tile { id, x0, y0, x1: x0 + TILE_W - 1.0, y1: y0 + TILE_H - 1.0, caption }
+    let (x0, y0) = (
+        GAP + (TILE_W + GAP) * col as f32,
+        GAP + (TILE_H + GAP) * row as f32,
+    );
+    Control::Tile {
+        id,
+        x0,
+        y0,
+        x1: x0 + TILE_W - 1.0,
+        y1: y0 + TILE_H - 1.0,
+        caption,
+    }
 }
 
 const CONTROLS: [Control; dsp::PARAMS] = [
@@ -85,7 +101,12 @@ pub const SPEC: &Spec = &Spec {
     controls: &CONTROLS,
     display: None,
     // The name's last letter ends a pixel inside `x` (its side bearing).
-    mark: Mark { x: W - GAP + 1.0, y: BAND_Y + BAND_H / 2.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: W - GAP + 1.0,
+        y: BAND_Y + BAND_H / 2.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     // The well's outline covers its far edges (as `Rect::span`): one pixel less each way.
     hint: Some(Rect::new(GAP, BAND_Y, W - 2.0 * GAP - 1.0, BAND_H - 1.0)),
     labels: &[],
@@ -133,7 +154,9 @@ fn text(k: usize, v: i32) -> String {
             v => format!("{:.1}% triangle", percent(k, v)),
         },
         dsp::FEED => format!("{:.0}%", percent(k, v)),
-        dsp::INVERT_FEED | dsp::INVERT_WET => if dsp::switch(x(k, v)) { "On" } else { "Off" }.into(),
+        dsp::INVERT_FEED | dsp::INVERT_WET => {
+            if dsp::switch(x(k, v)) { "On" } else { "Off" }.into()
+        }
         k => db_text_fine(x(k, v)),
     }
 }
@@ -147,7 +170,11 @@ fn parse(k: usize, s: &str) -> Option<i32> {
         dsp::PHASE => Some(nearest_rising(range, leading_number(&low)?, degrees)),
         dsp::SHAPE if low.starts_with("sin") => Some(range.0),
         dsp::SHAPE if low.starts_with("tri") => Some(range.1),
-        dsp::DAMP | dsp::SHAPE | dsp::FEED => Some(nearest_rising(range, leading_number(&low)?, |v| percent(k, v))),
+        dsp::DAMP | dsp::SHAPE | dsp::FEED => {
+            Some(nearest_rising(range, leading_number(&low)?, |v| {
+                percent(k, v)
+            }))
+        }
         dsp::INVERT_FEED | dsp::INVERT_WET => match low.as_str() {
             "on" | "yes" => Some(range.1),
             "off" | "no" => Some(range.0),
@@ -158,7 +185,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 struct FlangerSound(Flanger);
@@ -189,9 +218,14 @@ impl Kind for FlangerKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-flanger";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's flanger";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Flanger, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Flanger,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioFlngr";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Modulation];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Modulation];
 }
 
 pub type LemonFlanger = SmallFx<FlangerKind>;
@@ -203,9 +237,16 @@ mod tests {
     #[test]
     fn the_grid_is_six_pixels_apart() {
         assert_eq!(SPEC.size, (504, 242));
-        let Control::Tile { x0, y0, x1, y1, .. } = CONTROLS[0] else { unreachable!() };
-        assert_eq!((x0, y0, x1 + 1.0 - x0, y1 + 1.0 - y0), (6.0, 6.0, 160.0, 46.0));
-        let Control::Tile { x0, x1, y0, y1, .. } = CONTROLS[11] else { unreachable!() };
+        let Control::Tile { x0, y0, x1, y1, .. } = CONTROLS[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            (x0, y0, x1 + 1.0 - x0, y1 + 1.0 - y0),
+            (6.0, 6.0, 160.0, 46.0)
+        );
+        let Control::Tile { x0, x1, y0, y1, .. } = CONTROLS[11] else {
+            unreachable!()
+        };
         // The last tile ends 6 px from the right edge and 6 px over the band; the band 6 px from the bottom.
         assert_eq!((W - (x1 + 1.0), BAND_Y - (y1 + 1.0), x0), (6.0, 6.0, 338.0));
         assert_eq!(SPEC.size.1 as f32 - (BAND_Y + BAND_H), 6.0);
@@ -236,7 +277,10 @@ mod tests {
         assert_eq!(text(dsp::WET, 5000), "0.0dB");
         assert_eq!(parse(dsp::DELAY, "20"), Some(1024));
         assert_eq!(parse(dsp::DEPTH, "2.3529 ms"), Some(2000));
-        assert_eq!(text(dsp::DEPTH, parse(dsp::DEPTH, "2.35 ms").unwrap()), "2.35ms");
+        assert_eq!(
+            text(dsp::DEPTH, parse(dsp::DEPTH, "2.35 ms").unwrap()),
+            "2.35ms"
+        );
         assert_eq!(text(dsp::WET, 4990), "0.0dB", "not -0.0dB");
         assert_eq!(parse(dsp::RATE, "5"), Some(5000));
         assert_eq!(parse(dsp::PHASE, "90"), Some(90));
@@ -256,7 +300,8 @@ mod tests {
         let mut s = sound(48000, &v);
         let mut f = Flanger::with_settings(48000, &settings(&v));
         let input = |i: usize| ((i as f32) * 0.021).sin() * 0.5;
-        let (mut l, mut r): (Vec<f32>, Vec<f32>) = (0..3000).map(|i| (input(i), -input(i + 11))).unzip();
+        let (mut l, mut r): (Vec<f32>, Vec<f32>) =
+            (0..3000).map(|i| (input(i), -input(i + 11))).unzip();
         let (mut l2, mut r2) = (l.clone(), r.clone());
         s.process(&mut l, &mut r);
         f.process(&mut l2, &mut r2);

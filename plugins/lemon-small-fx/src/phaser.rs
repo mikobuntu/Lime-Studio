@@ -17,7 +17,13 @@ use crate::params::{db_text_fine, leading_number, nearest, nearest_rising, parse
 use crate::{Control, Kind, Mark, Setting, SmallFx, Sound, Spec};
 
 const fn setting(id: &'static str, name: &'static str, k: usize, magnet: Option<i32>) -> Setting {
-    Setting { id, name, range: dsp::RANGES[k], start: dsp::DEFAULTS[k], magnet }
+    Setting {
+        id,
+        name,
+        range: dsp::RANGES[k],
+        start: dsp::DEFAULTS[k],
+        magnet,
+    }
 }
 
 /// The output gain knob's unity (0 dB before the feedback's reduction).
@@ -50,8 +56,18 @@ const H: f32 = BAND_Y + BAND_H + GAP;
 
 /// Tile `(col, row)`: `Control::Tile` takes end-inclusive edges, so the last pixel is `x0 + TILE_W - 1`.
 const fn tile(id: &'static str, col: usize, row: usize, caption: &'static str) -> Control {
-    let (x0, y0) = (GAP + (TILE_W + GAP) * col as f32, GAP + (TILE_H + GAP) * row as f32);
-    Control::Tile { id, x0, y0, x1: x0 + TILE_W - 1.0, y1: y0 + TILE_H - 1.0, caption }
+    let (x0, y0) = (
+        GAP + (TILE_W + GAP) * col as f32,
+        GAP + (TILE_H + GAP) * row as f32,
+    );
+    Control::Tile {
+        id,
+        x0,
+        y0,
+        x1: x0 + TILE_W - 1.0,
+        y1: y0 + TILE_H - 1.0,
+        caption,
+    }
 }
 
 const CONTROLS: [Control; dsp::PARAMS] = [
@@ -82,7 +98,12 @@ pub const SPEC: &Spec = &Spec {
     controls: &CONTROLS,
     display: None,
     // The name's last letter ends a pixel inside `x` (its side bearing).
-    mark: Mark { x: W - GAP + 1.0, y: BAND_Y + BAND_H / 2.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: W - GAP + 1.0,
+        y: BAND_Y + BAND_H / 2.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     // The well's outline covers its far edges (as `Rect::span`): one pixel less each way.
     hint: Some(Rect::new(GAP, BAND_Y, W - 2.0 * GAP - 1.0, BAND_H - 1.0)),
     labels: &[],
@@ -138,10 +159,20 @@ fn parse(k: usize, s: &str) -> Option<i32> {
         // The 2 Hz range's frequency; a whole text names the value that shows it.
         dsp::SWEEP => {
             let v = nearest_rising(range, leading_number(&low)?, |v| hz(v, false));
-            let same = |w: i32| text(k, w).to_ascii_lowercase().replace(' ', "") == low.replace(' ', "");
-            Some((v - 40..=v + 40).filter(|&w| (range.0..=range.1).contains(&w)).find(|&w| same(w)).unwrap_or(v))
+            let same =
+                |w: i32| text(k, w).to_ascii_lowercase().replace(' ', "") == low.replace(' ', "");
+            Some(
+                (v - 40..=v + 40)
+                    .filter(|&w| (range.0..=range.1).contains(&w))
+                    .find(|&w| same(w))
+                    .unwrap_or(v),
+            )
         }
-        dsp::MIN_DEPTH | dsp::MAX_DEPTH | dsp::FEEDBACK => Some(nearest_rising(range, leading_number(&low)?, |v| percent(k, v))),
+        dsp::MIN_DEPTH | dsp::MAX_DEPTH | dsp::FEEDBACK => {
+            Some(nearest_rising(range, leading_number(&low)?, |v| {
+                percent(k, v)
+            }))
+        }
         dsp::RANGE => {
             if low.starts_with("small") || leading_number(&low).is_some_and(|n| n < 6.0) {
                 Some(range.0)
@@ -152,7 +183,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
             }
         }
         dsp::STEREO => Some(nearest_rising(range, leading_number(&low)?, degrees)),
-        dsp::STAGES => Some(nearest_rising(range, leading_number(&low)?, |v| dsp::stages(v) as f64)),
+        dsp::STAGES => Some(nearest_rising(range, leading_number(&low)?, |v| {
+            dsp::stages(v) as f64
+        })),
         dsp::DRY_WET => {
             let n = leading_number(&low)?;
             // "<n>% dry" names the other share.
@@ -164,7 +197,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 struct PhaserSound(Phaser);
@@ -195,9 +230,14 @@ impl Kind for PhaserKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-phaser";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's phaser";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Phaser, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Phaser,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioPhasr";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Modulation];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Modulation];
 }
 
 pub type LemonPhaser = SmallFx<PhaserKind>;
@@ -209,8 +249,13 @@ mod tests {
     #[test]
     fn the_grid_is_six_pixels_apart() {
         assert_eq!(SPEC.size, (504, 190));
-        let Control::Tile { x0, y0, x1, y1, .. } = CONTROLS[8] else { unreachable!() };
-        assert_eq!((x0, y0, W - (x1 + 1.0), BAND_Y - (y1 + 1.0)), (338.0, 110.0, 6.0, 6.0));
+        let Control::Tile { x0, y0, x1, y1, .. } = CONTROLS[8] else {
+            unreachable!()
+        };
+        assert_eq!(
+            (x0, y0, W - (x1 + 1.0), BAND_Y - (y1 + 1.0)),
+            (338.0, 110.0, 6.0, 6.0)
+        );
     }
 
     #[test]
@@ -234,7 +279,10 @@ mod tests {
         assert_eq!(text(dsp::GAIN, UNITY), "0.0dB");
         assert_eq!(text(dsp::GAIN, 0), "-INFdB");
         assert_eq!(parse(dsp::SWEEP, "2"), Some(5000));
-        assert_eq!(text(dsp::SWEEP, parse(dsp::SWEEP, "0.238 / 1.19Hz").unwrap()), "0.238 / 1.19Hz");
+        assert_eq!(
+            text(dsp::SWEEP, parse(dsp::SWEEP, "0.238 / 1.19Hz").unwrap()),
+            "0.238 / 1.19Hz"
+        );
         assert_eq!(parse(dsp::RANGE, "10hz"), Some(1024));
         assert_eq!(parse(dsp::RANGE, "small"), Some(0));
         assert_eq!(parse(dsp::STAGES, "23"), Some(22));
@@ -252,7 +300,8 @@ mod tests {
         let mut s = sound(44100, &v);
         let mut p = Phaser::with_settings(44100, &settings(&v));
         let input = |i: usize| ((i as f32) * 0.017).sin() * 0.5;
-        let (mut l, mut r): (Vec<f32>, Vec<f32>) = (0..3000).map(|i| (input(i), input(i + 5))).unzip();
+        let (mut l, mut r): (Vec<f32>, Vec<f32>) =
+            (0..3000).map(|i| (input(i), input(i + 5))).unzip();
         let (mut l2, mut r2) = (l.clone(), r.clone());
         s.process(&mut l, &mut r);
         p.process(&mut l2, &mut r2);

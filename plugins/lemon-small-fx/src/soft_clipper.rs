@@ -12,23 +12,61 @@ use os_engine::effects::soft_clipper::{self as dsp, Settings, SoftClipper};
 use os_ui::{Canvas, Rect};
 
 use crate::params::{db_text, parse_db};
-use crate::{view, Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec};
+use crate::{Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec, view};
 
 /// The settings in the original's order (spec §5).
 pub const SETTINGS: [Setting; dsp::PARAMS] = [
-    Setting { id: "threshold", name: "Threshold", range: dsp::RANGES[dsp::THRESHOLD], start: dsp::DEFAULTS[dsp::THRESHOLD], magnet: None },
-    Setting { id: "post", name: "Post gain", range: dsp::RANGES[dsp::POST], start: dsp::DEFAULTS[dsp::POST], magnet: Some(128) },
+    Setting {
+        id: "threshold",
+        name: "Threshold",
+        range: dsp::RANGES[dsp::THRESHOLD],
+        start: dsp::DEFAULTS[dsp::THRESHOLD],
+        magnet: None,
+    },
+    Setting {
+        id: "post",
+        name: "Post gain",
+        range: dsp::RANGES[dsp::POST],
+        start: dsp::DEFAULTS[dsp::POST],
+        magnet: Some(128),
+    },
 ];
 
 /// Editor layout (spec §2), as the original's: the two knobs over the wordmark at the left, the curve at the right.
 const CARDS: [Card; 2] = [
-    Card { x0: 8.0, x1: 156.0, y0: 28.0, y1: 104.0, heading: "CLIPPER" },
-    Card { x0: 162.0, x1: 312.0, y0: 28.0, y1: 152.0, heading: "CURVE" },
+    Card {
+        x0: 8.0,
+        x1: 156.0,
+        y0: 28.0,
+        y1: 104.0,
+        heading: "CLIPPER",
+    },
+    Card {
+        x0: 162.0,
+        x1: 312.0,
+        y0: 28.0,
+        y1: 152.0,
+        heading: "CURVE",
+    },
 ];
 
 const CONTROLS: [Control; 2] = [
-    Control::Knob { id: "threshold", cx: 46.0, cy: 62.0, r: 20.0, caption: "THRESHOLD", bipolar: false },
-    Control::Knob { id: "post", cx: 118.0, cy: 62.0, r: 20.0, caption: "POST GAIN", bipolar: false },
+    Control::Knob {
+        id: "threshold",
+        cx: 46.0,
+        cy: 62.0,
+        r: 20.0,
+        caption: "THRESHOLD",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "post",
+        cx: 118.0,
+        cy: 62.0,
+        r: 20.0,
+        caption: "POST GAIN",
+        bipolar: false,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -45,8 +83,16 @@ pub const SPEC: &Spec = &Spec {
     size: (320, 160),
     cards: &CARDS,
     controls: &CONTROLS,
-    display: Some(Display { r: Rect::new(170.0, 36.0, 134.0, 108.0), draw: curve }),
-    mark: Mark { x: 82.0, y: 114.0, anchor: 0.5, stacked: true },
+    display: Some(Display {
+        r: Rect::new(170.0, 36.0, 134.0, 108.0),
+        draw: curve,
+    }),
+    mark: Mark {
+        x: 82.0,
+        y: 114.0,
+        anchor: 0.5,
+        stacked: true,
+    },
     hint: None,
     labels: &[],
     text,
@@ -72,7 +118,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 /// The curve the settings make (input -2..2 across, output -1.25..1.25 up), post gain included.
@@ -104,9 +152,14 @@ impl Kind for SoftClipperKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-soft-clipper";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's soft clipper";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Distortion, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Distortion,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioClipr";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
 }
 
 pub type LemonSoftClipper = SmallFx<SoftClipperKind>;

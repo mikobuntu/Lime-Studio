@@ -16,3 +16,5 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-featur
 lemon-small-fx = { path = "../lemon-small-fx" }
 os-plugkit = { path = "../../crates/os-plugkit" }
 os-ui = { path = "../../crates/os-ui" }
+[dev-dependencies]
+tiny-skia = "0.11"

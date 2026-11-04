@@ -429,6 +429,8 @@ impl Logic {
         match (&t, btn) {
             (Target::Logo, Btn::Left | Btn::Right) => acts.push(Act::Menu(MenuReq::About, x, y)),
             (Target::Logo, _) => {}
+            (Target::Lane(lane), Btn::Left) => self.view.selected = *lane,
+            (Target::Lane(_), _) => {}
             // A text field types its text in (it has no value to reset or automate).
             (Target::Text(_), Btn::Left | Btn::Right) => acts.push(Act::TypeIn(id, x, y)),
             (Target::Text(_), _) => {}
@@ -445,33 +447,40 @@ impl Logic {
                     .any(|control| control.is_step_cell(&id)) =>
             {
                 let on = self.step_active(&id);
-                let resize_edge = self.step_cell(&id).and_then(|(lane, column)| {
-                    let (start, end) = self.step_segment(lane, column)?;
-                    let left_grip = column == start && x - hit_rect.x <= hit_rect.w * 0.3;
-                    let right_grip = column == end && hit_rect.right() - x <= hit_rect.w * 0.3;
-                    match (left_grip, right_grip) {
-                        (true, true) => Some((
-                            lane,
-                            start,
-                            end,
-                            if x - hit_rect.x < hit_rect.w / 2.0 {
-                                StepEdge::Start
-                            } else {
-                                StepEdge::End
-                            },
-                        )),
-                        (true, false) => Some((lane, start, end, StepEdge::Start)),
-                        (false, true) => Some((lane, start, end, StepEdge::End)),
-                        (false, false) => None,
-                    }
-                });
+                let erase = m.ctrl;
+                let resize_edge =
+                    self.step_cell(&id)
+                        .filter(|_| !erase)
+                        .and_then(|(lane, column)| {
+                            let (start, end) = self.step_segment(lane, column)?;
+                            let left_grip = column == start && x - hit_rect.x <= hit_rect.w * 0.3;
+                            let right_grip =
+                                column == end && hit_rect.right() - x <= hit_rect.w * 0.3;
+                            match (left_grip, right_grip) {
+                                (true, true) => Some((
+                                    lane,
+                                    start,
+                                    end,
+                                    if x - hit_rect.x < hit_rect.w / 2.0 {
+                                        StepEdge::Start
+                                    } else {
+                                        StepEdge::End
+                                    },
+                                )),
+                                (true, false) => Some((lane, start, end, StepEdge::Start)),
+                                (false, true) => Some((lane, start, end, StepEdge::End)),
+                                (false, false) => None,
+                            }
+                        });
                 if let Some((lane, start, end, edge)) = resize_edge {
                     self.begin_step_resize(lane, start, end, edge);
                     self.view.pressed = Some(t.clone());
                 } else {
-                    self.vals.edit_plain(&id, *v as f32);
+                    // Ctrl always clears, whatever the first cell held.
+                    let value = if erase { self.range(&id).0 } else { *v };
+                    self.vals.edit_plain(&id, value as f32);
                     self.step_gesture = Some(StepGesture::Paint {
-                        on: !on,
+                        on: !erase && !on,
                         last_id: id.clone(),
                     });
                     self.view.pressed = Some(t.clone());
@@ -597,7 +606,7 @@ impl Logic {
     pub fn wheel(&mut self, x: f32, y: f32, notches: f32, m: Mods) -> Vec<Act> {
         let Some((t, _)) = self
             .hit(x, y)
-            .filter(|(t, _)| !matches!(t, Target::Logo | Target::Text(_)))
+            .filter(|(t, _)| !matches!(t, Target::Logo | Target::Lane(_) | Target::Text(_)))
         else {
             return vec![];
         };

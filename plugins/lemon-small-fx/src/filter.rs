@@ -14,7 +14,7 @@ use os_theme::design::lemon as brand;
 use os_ui::kit::lemon::plug;
 use os_ui::{Canvas, Rect};
 
-use crate::params::{db_text, leading_number, nearest, nearest_rising, parse_db, BYTE};
+use crate::params::{BYTE, db_text, leading_number, nearest, nearest_rising, parse_db};
 use crate::{Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec};
 
 /// Center, after the original's six settings: a switch stored in the byte after them (spec §5).
@@ -22,34 +22,151 @@ pub const CENTER: usize = dsp::PARAMS;
 
 /// The settings in the original's order, then Center (spec §5).
 pub const SETTINGS: [Setting; dsp::PARAMS + 1] = [
-    Setting { id: "cutoff", name: "Cutoff frequency", range: dsp::RANGES[dsp::CUTOFF], start: dsp::DEFAULTS[dsp::CUTOFF], magnet: None },
-    Setting { id: "resonance", name: "Resonance", range: dsp::RANGES[dsp::RESONANCE], start: dsp::DEFAULTS[dsp::RESONANCE], magnet: None },
-    Setting { id: "low", name: "Low pass", range: dsp::RANGES[dsp::LOW], start: dsp::DEFAULTS[dsp::LOW], magnet: Some(1024) },
-    Setting { id: "band", name: "Band pass", range: dsp::RANGES[dsp::BAND], start: dsp::DEFAULTS[dsp::BAND], magnet: Some(1024) },
-    Setting { id: "high", name: "High pass", range: dsp::RANGES[dsp::HIGH], start: dsp::DEFAULTS[dsp::HIGH], magnet: Some(1024) },
-    Setting { id: "x2", name: "X 2", range: dsp::RANGES[dsp::X2], start: dsp::DEFAULTS[dsp::X2], magnet: None },
-    Setting { id: "center", name: "Center", range: (0, 1), start: 1, magnet: None },
+    Setting {
+        id: "cutoff",
+        name: "Cutoff frequency",
+        range: dsp::RANGES[dsp::CUTOFF],
+        start: dsp::DEFAULTS[dsp::CUTOFF],
+        magnet: None,
+    },
+    Setting {
+        id: "resonance",
+        name: "Resonance",
+        range: dsp::RANGES[dsp::RESONANCE],
+        start: dsp::DEFAULTS[dsp::RESONANCE],
+        magnet: None,
+    },
+    Setting {
+        id: "low",
+        name: "Low pass",
+        range: dsp::RANGES[dsp::LOW],
+        start: dsp::DEFAULTS[dsp::LOW],
+        magnet: Some(1024),
+    },
+    Setting {
+        id: "band",
+        name: "Band pass",
+        range: dsp::RANGES[dsp::BAND],
+        start: dsp::DEFAULTS[dsp::BAND],
+        magnet: Some(1024),
+    },
+    Setting {
+        id: "high",
+        name: "High pass",
+        range: dsp::RANGES[dsp::HIGH],
+        start: dsp::DEFAULTS[dsp::HIGH],
+        magnet: Some(1024),
+    },
+    Setting {
+        id: "x2",
+        name: "X 2",
+        range: dsp::RANGES[dsp::X2],
+        start: dsp::DEFAULTS[dsp::X2],
+        magnet: None,
+    },
+    Setting {
+        id: "center",
+        name: "Center",
+        range: (0, 1),
+        start: 1,
+        magnet: None,
+    },
 ];
 
 /// Editor layout (spec §2): cards 6 px from the edges and 6 px apart (`Rect::span` takes the last pixel, so a card
 /// ending at x1 leaves x1 + 1 .. x1 + 6 clear). The filter's two knobs, the three levels, the two switches; the
 /// response and the wordmark under them.
 const CARDS: [Card; 5] = [
-    Card { x0: 6.0, x1: 138.0, y0: 28.0, y1: 116.0, heading: "FILTER" },
-    Card { x0: 145.0, x1: 344.0, y0: 28.0, y1: 116.0, heading: "MIX" },
-    Card { x0: 351.0, x1: 412.0, y0: 28.0, y1: 116.0, heading: "X 2" },
-    Card { x0: 419.0, x1: 480.0, y0: 28.0, y1: 116.0, heading: "CENTER" },
-    Card { x0: 6.0, x1: 318.0, y0: 123.0, y1: 200.0, heading: "" },
+    Card {
+        x0: 6.0,
+        x1: 138.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "FILTER",
+    },
+    Card {
+        x0: 145.0,
+        x1: 344.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "MIX",
+    },
+    Card {
+        x0: 351.0,
+        x1: 412.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "X 2",
+    },
+    Card {
+        x0: 419.0,
+        x1: 480.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "CENTER",
+    },
+    Card {
+        x0: 6.0,
+        x1: 318.0,
+        y0: 123.0,
+        y1: 200.0,
+        heading: "",
+    },
 ];
 
 const CONTROLS: [Control; 7] = [
-    Control::Knob { id: "cutoff", cx: 40.0, cy: 60.0, r: 24.0, caption: "CUTOFF", bipolar: false },
-    Control::Knob { id: "resonance", cx: 105.0, cy: 64.0, r: 20.0, caption: "RES", bipolar: false },
-    Control::Knob { id: "low", cx: 181.0, cy: 64.0, r: 20.0, caption: "LOW", bipolar: false },
-    Control::Knob { id: "band", cx: 245.0, cy: 64.0, r: 20.0, caption: "BAND", bipolar: false },
-    Control::Knob { id: "high", cx: 309.0, cy: 64.0, r: 20.0, caption: "HIGH", bipolar: false },
-    Control::Choice { id: "x2", x: 364.0, top: 57.0, names: &["OFF", "ON"] },
-    Control::Choice { id: "center", x: 432.0, top: 57.0, names: &["OFF", "ON"] },
+    Control::Knob {
+        id: "cutoff",
+        cx: 40.0,
+        cy: 60.0,
+        r: 24.0,
+        caption: "CUTOFF",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "resonance",
+        cx: 105.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "RES",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "low",
+        cx: 181.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "LOW",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "band",
+        cx: 245.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "BAND",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "high",
+        cx: 309.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "HIGH",
+        bipolar: false,
+    },
+    Control::Choice {
+        id: "x2",
+        x: 364.0,
+        top: 57.0,
+        names: &["OFF", "ON"],
+    },
+    Control::Choice {
+        id: "center",
+        x: 432.0,
+        top: 57.0,
+        names: &["OFF", "ON"],
+    },
 ];
 
 /// The response well, 6 px inside its card.
@@ -69,8 +186,16 @@ pub const SPEC: &Spec = &Spec {
     size: (487, 207),
     cards: &CARDS,
     controls: &CONTROLS,
-    display: Some(Display { r: RESPONSE, draw: response }),
-    mark: Mark { x: 400.0, y: 162.0, anchor: 0.5, stacked: false },
+    display: Some(Display {
+        r: RESPONSE,
+        draw: response,
+    }),
+    mark: Mark {
+        x: 400.0,
+        y: 162.0,
+        anchor: 0.5,
+        stacked: false,
+    },
     hint: None,
     labels: &[],
     text,
@@ -115,7 +240,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
             let hz = if low.contains('k') { x * 1000.0 } else { x };
             Some(nearest_rising(range, hz, |v| dsp::cutoff_hz(v, RATE)))
         }
-        dsp::RESONANCE => nearest(range, leading_number(&low)?, |v| Some(f64::from(v) / 1024.0 * 100.0)),
+        dsp::RESONANCE => nearest(range, leading_number(&low)?, |v| {
+            Some(f64::from(v) / 1024.0 * 100.0)
+        }),
         dsp::X2 | CENTER => match low.as_str() {
             "on" | "1" => Some(1),
             "off" | "0" => Some(0),
@@ -126,7 +253,10 @@ fn parse(k: usize, s: &str) -> Option<i32> {
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]), center: v[CENTER] == 1 }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+        center: v[CENTER] == 1,
+    }
 }
 
 /// The response (spec §2): its gain in dB over 20 Hz .. 20 kHz on a log scale, -36 .. +18 dB up; dim lines at 0 dB and
@@ -142,7 +272,10 @@ fn response(c: &mut Canvas, r: Rect, v: &[i32]) {
     let unity = y_of(0.0).round();
     c.fill_rect(Rect::new(inner.x, unity, inner.w, 1.0), plug::GRID);
     for hz in [100.0, 1000.0, 10000.0] {
-        c.fill_rect(Rect::new(x_of(hz).round(), inner.y, 1.0, inner.h), plug::GRID);
+        c.fill_rect(
+            Rect::new(x_of(hz).round(), inner.y, 1.0, inner.h),
+            plug::GRID,
+        );
     }
     let s = settings(v);
     let n = inner.w.max(2.0) as usize;
@@ -184,9 +317,14 @@ impl Kind for FilterKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-filter";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's filter";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Filter, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Filter,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioFiltr";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Filter];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Filter];
 }
 
 pub type LemonFilter = SmallFx<FilterKind>;
@@ -194,7 +332,9 @@ pub type LemonFilter = SmallFx<FilterKind>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{default_state, fl_from_plugin_state, plugin_state_from_fl, setting, to_fl, values_of};
+    use crate::params::{
+        default_state, fl_from_plugin_state, plugin_state_from_fl, setting, to_fl, values_of,
+    };
 
     #[test]
     fn value_texts_and_typed_values() {
@@ -221,16 +361,27 @@ mod tests {
         assert_eq!(b, Settings::default().to_state());
         assert_eq!(values_of(SPEC, &b), [1024, 205, 1024, 0, 512, 0, 1]);
         // FL's "Tiny speakers", Center byte with other bits set: kept.
-        let mut fl = Settings { v: [544, 0, 0, 1024, 464, 1], center: true }.to_state();
+        let mut fl = Settings {
+            v: [544, 0, 0, 1024, 464, 1],
+            center: true,
+        }
+        .to_state();
         fl[28] = 0x81;
         let mut vals = values_of(SPEC, &fl);
         assert_eq!(vals, [544, 0, 0, 1024, 464, 1, 1]);
         vals[CENTER] = 0;
         let out = to_fl(SPEC, &vals, &fl);
         assert_eq!(out[28], 0x80);
-        assert_eq!(fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &out)), Some(out));
+        assert_eq!(
+            fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &out)),
+            Some(out)
+        );
         // Version 1.
-        let mut v1 = Settings { v: [300, 400, 500, 600, 700, 0], center: false }.to_state();
+        let mut v1 = Settings {
+            v: [300, 400, 500, 600, 700, 0],
+            center: false,
+        }
+        .to_state();
         v1.truncate(28);
         v1[0] = 1;
         assert_eq!(setting(SPEC, &v1, CENTER), 0);
@@ -238,7 +389,13 @@ mod tests {
         assert_eq!(to_fl(SPEC, &vals, &v1), v1);
         vals[CENTER] = 1;
         let out = to_fl(SPEC, &vals, &v1);
-        assert_eq!(Settings::from_state(&out), Some(Settings { v: [300, 400, 500, 600, 700, 0], center: true }));
+        assert_eq!(
+            Settings::from_state(&out),
+            Some(Settings {
+                v: [300, 400, 500, 600, 700, 0],
+                center: true
+            })
+        );
         // Version 3: not read.
         let mut v3 = Settings::default().to_state();
         v3[0] = 3;
@@ -251,7 +408,9 @@ mod tests {
         let v = [480, 1024, 0, 0, 1024, 1, 1];
         let mut s = sound(44100, &v);
         let mut fx = Filter::with_settings(44100, &settings(&v));
-        let input: Vec<f32> = (0..400).map(|i| ((i * 13 % 29) as f32 / 14.0 - 1.0) * 0.5).collect();
+        let input: Vec<f32> = (0..400)
+            .map(|i| ((i * 13 % 29) as f32 / 14.0 - 1.0) * 0.5)
+            .collect();
         let (mut l, mut r) = (input.clone(), input.clone());
         let (mut l2, mut r2) = (input.clone(), input);
         s.process(&mut l, &mut r);

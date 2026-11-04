@@ -39,23 +39,125 @@ pub const INPUTS: i32 = 16;
 
 /// The settings in the saved state's order (spec §5): their ints, then the L/R switch, the byte after the ints.
 pub const SETTINGS: [Setting; 17] = [
-    Setting { id: "wet", name: "Wet level", range: (0, 2000), start: 1000, magnet: Some(1000) },
-    Setting { id: "mod", name: "Modulator pass-through level", range: (0, 16000), start: 12800, magnet: Some(12800) },
-    Setting { id: "mod_hp", name: "Modulator pass-through high-pass", range: (0, 65536), start: 55000, magnet: None },
-    Setting { id: "car", name: "Carrier pass-through level", range: (0, 16000), start: 0, magnet: Some(12800) },
-    Setting { id: "car_lp", name: "Carrier pass-through low-pass", range: (0, 65536), start: 28000, magnet: None },
-    Setting { id: "noise", name: "Carrier added noise level", range: (0, 12800), start: 0, magnet: None },
-    Setting { id: "noise_hp", name: "Carrier added noise high-pass", range: (0, 65536), start: 55000, magnet: None },
-    Setting { id: "hold", name: "Hold time", range: (0, 10000), start: 1666, magnet: None },
-    Setting { id: "attack", name: "Attack time", range: (0, 10000), start: 1115, magnet: None },
-    Setting { id: "release", name: "Release time", range: (0, 10000), start: 3500, magnet: None },
-    Setting { id: "width", name: "Band width", range: (5, 1000), start: 349, magnet: None },
-    Setting { id: "rms", name: "Hold mode", range: (0, 1), start: 0, magnet: None },
-    Setting { id: "order", name: "Order", range: (1, 4), start: 2, magnet: None },
-    Setting { id: "bands", name: "Band count", range: (5, 100), start: 47, magnet: None },
-    Setting { id: "mod_input", name: "Modulator input", range: (0, INPUTS), start: 0, magnet: None },
-    Setting { id: "car_input", name: "Carrier input", range: (-1, INPUTS), start: 1, magnet: None },
-    Setting { id: "lr", name: "L/R interlaced input", range: (0, 1), start: 0, magnet: None },
+    Setting {
+        id: "wet",
+        name: "Wet level",
+        range: (0, 2000),
+        start: 1000,
+        magnet: Some(1000),
+    },
+    Setting {
+        id: "mod",
+        name: "Modulator pass-through level",
+        range: (0, 16000),
+        start: 12800,
+        magnet: Some(12800),
+    },
+    Setting {
+        id: "mod_hp",
+        name: "Modulator pass-through high-pass",
+        range: (0, 65536),
+        start: 55000,
+        magnet: None,
+    },
+    Setting {
+        id: "car",
+        name: "Carrier pass-through level",
+        range: (0, 16000),
+        start: 0,
+        magnet: Some(12800),
+    },
+    Setting {
+        id: "car_lp",
+        name: "Carrier pass-through low-pass",
+        range: (0, 65536),
+        start: 28000,
+        magnet: None,
+    },
+    Setting {
+        id: "noise",
+        name: "Carrier added noise level",
+        range: (0, 12800),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "noise_hp",
+        name: "Carrier added noise high-pass",
+        range: (0, 65536),
+        start: 55000,
+        magnet: None,
+    },
+    Setting {
+        id: "hold",
+        name: "Hold time",
+        range: (0, 10000),
+        start: 1666,
+        magnet: None,
+    },
+    Setting {
+        id: "attack",
+        name: "Attack time",
+        range: (0, 10000),
+        start: 1115,
+        magnet: None,
+    },
+    Setting {
+        id: "release",
+        name: "Release time",
+        range: (0, 10000),
+        start: 3500,
+        magnet: None,
+    },
+    Setting {
+        id: "width",
+        name: "Band width",
+        range: (5, 1000),
+        start: 349,
+        magnet: None,
+    },
+    Setting {
+        id: "rms",
+        name: "Hold mode",
+        range: (0, 1),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "order",
+        name: "Order",
+        range: (1, 4),
+        start: 2,
+        magnet: None,
+    },
+    Setting {
+        id: "bands",
+        name: "Band count",
+        range: (5, 100),
+        start: 47,
+        magnet: None,
+    },
+    Setting {
+        id: "mod_input",
+        name: "Modulator input",
+        range: (0, INPUTS),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "car_input",
+        name: "Carrier input",
+        range: (-1, INPUTS),
+        start: 1,
+        magnet: None,
+    },
+    Setting {
+        id: "lr",
+        name: "L/R interlaced input",
+        range: (0, 1),
+        start: 0,
+        magnet: None,
+    },
 ];
 
 /// The int of the original's state each setting is.
@@ -129,16 +231,59 @@ const MID2: f32 = (TOP2 + FOOT2 + 1.0) / 2.0;
 const MID1: f32 = (TOP1 + FOOT1 + 1.0) / 2.0;
 
 const CARDS: [Card; 6] = [
-    Card { x0: MIX_X0, x1: MIX_X1, y0: TOP1, y1: FOOT1, heading: "MIXER" },
-    Card { x0: NOISE_X0, x1: NOISE_X1, y0: TOP1, y1: FOOT1, heading: "NOISE" },
-    Card { x0: IN_X0, x1: IN_X1, y0: TOP1, y1: FOOT1, heading: "INPUTS" },
-    Card { x0: LR_X0, x1: LR_X1, y0: TOP1, y1: FOOT1, heading: "L/R" },
-    Card { x0: ENV_X0, x1: ENV_X1, y0: TOP2, y1: FOOT2, heading: "ENVELOPE" },
-    Card { x0: BAND_X0, x1: BAND_X1, y0: TOP2, y1: FOOT2, heading: "BANDS" },
+    Card {
+        x0: MIX_X0,
+        x1: MIX_X1,
+        y0: TOP1,
+        y1: FOOT1,
+        heading: "MIXER",
+    },
+    Card {
+        x0: NOISE_X0,
+        x1: NOISE_X1,
+        y0: TOP1,
+        y1: FOOT1,
+        heading: "NOISE",
+    },
+    Card {
+        x0: IN_X0,
+        x1: IN_X1,
+        y0: TOP1,
+        y1: FOOT1,
+        heading: "INPUTS",
+    },
+    Card {
+        x0: LR_X0,
+        x1: LR_X1,
+        y0: TOP1,
+        y1: FOOT1,
+        heading: "L/R",
+    },
+    Card {
+        x0: ENV_X0,
+        x1: ENV_X1,
+        y0: TOP2,
+        y1: FOOT2,
+        heading: "ENVELOPE",
+    },
+    Card {
+        x0: BAND_X0,
+        x1: BAND_X1,
+        y0: TOP2,
+        y1: FOOT2,
+        heading: "BANDS",
+    },
 ];
 
 const fn knob(id: &'static str, x0: f32, k: f32, top: f32, caption: &'static str) -> Control {
-    Control::Knob { id, cx: x0 + SIDE + k * PITCH, cy: top + KNOB_DY, r: KNOB_R, caption, bipolar: false }
+    Control::Knob {
+        id,
+        cx: x0 + SIDE + k * PITCH,
+        cy: top + KNOB_DY,
+        r: KNOB_R,
+        caption,
+        bipolar: false,
+    }
 }
 
 const CONTROLS: [Control; 17] = [
@@ -151,14 +296,29 @@ const CONTROLS: [Control; 17] = [
     knob("noise_hp", NOISE_X0, 1.0, TOP1, "HP"),
     knob("mod_input", IN_X0, 0.0, TOP1, "MOD"),
     knob("car_input", IN_X0, 1.0, TOP1, "CAR"),
-    Control::Choice { id: "lr", x: LR_X0 + 13.0, top: MID1 - 16.0, names: &["OFF", "ON"] },
+    Control::Choice {
+        id: "lr",
+        x: LR_X0 + 13.0,
+        top: MID1 - 16.0,
+        names: &["OFF", "ON"],
+    },
     knob("hold", ENV_X0, 0.0, TOP2, "HOLD"),
     knob("attack", ENV_X0, 1.0, TOP2, "ATTACK"),
     knob("release", ENV_X0, 2.0, TOP2, "RELEASE"),
-    Control::Choice { id: "rms", x: ENV_LIST_X, top: MID2 - 16.0, names: &["PEAK", "RMS"] },
+    Control::Choice {
+        id: "rms",
+        x: ENV_LIST_X,
+        top: MID2 - 16.0,
+        names: &["PEAK", "RMS"],
+    },
     knob("bands", BAND_X0, 0.0, TOP2, "COUNT"),
     knob("width", BAND_X0, 1.0, TOP2, "WIDTH"),
-    Control::Choice { id: "order", x: BAND_LIST_X, top: MID2 - 32.0, names: &["ORDER 1", "ORDER 2", "ORDER 3", "ORDER 4"] },
+    Control::Choice {
+        id: "order",
+        x: BAND_LIST_X,
+        top: MID2 - 32.0,
+        names: &["ORDER 1", "ORDER 2", "ORDER 3", "ORDER 4"],
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -176,7 +336,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: WIDTH_PX - GAP, y: HINT_Y + HINT_H / 2.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: WIDTH_PX - GAP,
+        y: HINT_Y + HINT_H / 2.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(os_ui::Rect::new(GAP, HINT_Y, WIDTH_PX - 2.0 * GAP, HINT_H)),
     labels: &[],
     text,
@@ -202,7 +367,11 @@ pub fn settings(raw: &[u8], v: &[i32]) -> dsp::Settings {
 }
 
 fn hz_text(v: i32, off: bool) -> String {
-    if off { "Off".into() } else { format!("{:.0}Hz", dsp::cutoff_hz(v)) }
+    if off {
+        "Off".into()
+    } else {
+        format!("{:.0}Hz", dsp::cutoff_hz(v))
+    }
 }
 
 fn ms(k: usize, v: i32) -> f64 {
@@ -254,9 +423,13 @@ fn parse(k: usize, s: &str) -> Option<i32> {
         MOD_HP | NOISE_HP => hz((1, 65536)),
         CAR_LP if low == "off" => Some(65536),
         CAR_LP => hz((0, 65535)),
-        NOISE => Some(nearest_rising(range, leading_number(&low)?, |v| dsp::noise(v) * 100.0)),
+        NOISE => Some(nearest_rising(range, leading_number(&low)?, |v| {
+            dsp::noise(v) * 100.0
+        })),
         HOLD | ATTACK | RELEASE => Some(nearest_rising(range, leading_number(&low)?, |v| ms(k, v))),
-        WIDTH => Some(nearest_rising(range, leading_number(&low)?, |v| dsp::width(v) * 100.0)),
+        WIDTH => Some(nearest_rising(range, leading_number(&low)?, |v| {
+            dsp::width(v) * 100.0
+        })),
         RMS => match low.as_str() {
             "rms" | "1" => Some(1),
             "peak" | "0" => Some(0),
@@ -303,7 +476,11 @@ impl Sound for Alone {
         self.v.reset();
     }
     fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
-        let r = Routing { modulator: 0, carrier: 0, lr: self.lr };
+        let r = Routing {
+            modulator: 0,
+            carrier: 0,
+            lr: self.lr,
+        };
         let [ml, mr] = &mut self.m;
         ml.clear();
         ml.extend_from_slice(left);
@@ -321,7 +498,12 @@ impl Sound for Alone {
 }
 
 fn sound(rate: u32, v: &[i32]) -> Box<dyn Sound> {
-    let mut s = Alone { v: Vocoder::new(rate, Params::default()), lr: false, m: Default::default(), out: Default::default() };
+    let mut s = Alone {
+        v: Vocoder::new(rate, Params::default()),
+        lr: false,
+        m: Default::default(),
+        out: Default::default(),
+    };
     s.set(v);
     Box::new(s)
 }
@@ -329,7 +511,9 @@ fn sound(rate: u32, v: &[i32]) -> Box<dyn Sound> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{default_state, fl_from_plugin_state, plugin_state_from_fl, to_fl, values_of};
+    use crate::params::{
+        default_state, fl_from_plugin_state, plugin_state_from_fl, to_fl, values_of,
+    };
 
     /// The saved state is the original's whole state: a new instance's is FL 2026's default (with Lemon Studio's
     /// inputs), the settings read from and write to their ints, and everything else is kept.
@@ -359,7 +543,10 @@ mod tests {
         assert_eq!((s.v[dsp::BANDS], s.v[dsp::CAR_INPUT], s.lr), (20, -1, true));
         assert_eq!(&out[..1068], &fl[..1068], "the curves are kept");
         assert_eq!(s.v[dsp::SG], 150, "an int no setting covers is kept");
-        assert_eq!(fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &out)), Some(out.clone()));
+        assert_eq!(
+            fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &out)),
+            Some(out.clone())
+        );
         // A state that does not parse starts from the default.
         assert_eq!(crate::params::normalized(SPEC, vec![1, 2, 3]), b);
     }

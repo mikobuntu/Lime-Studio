@@ -19,7 +19,7 @@ use std::sync::{Arc, RwLock};
 use nih_plug::prelude::*;
 use os_plugkit::live::LiveEdits;
 
-use crate::{Spec, MAX};
+use crate::{MAX, Spec};
 
 /// How near (a share of the range) a drag has to come to a magnet to land on it.
 pub const MAGNET_ZONE: f32 = 0.015;
@@ -44,12 +44,25 @@ impl FxParams {
             .enumerate()
             .map(|(k, s)| {
                 let (text, parse) = (spec.text, spec.parse);
-                IntParam::new(s.name, s.start, IntRange::Linear { min: s.range.0, max: s.range.1 })
-                    .with_value_to_string(Arc::new(move |v| text(k, v)))
-                    .with_string_to_value(Arc::new(move |t| parse(k, t)))
+                IntParam::new(
+                    s.name,
+                    s.start,
+                    IntRange::Linear {
+                        min: s.range.0,
+                        max: s.range.1,
+                    },
+                )
+                .with_value_to_string(Arc::new(move |v| text(k, v)))
+                .with_string_to_value(Arc::new(move |t| parse(k, t)))
             })
             .collect();
-        FxParams { spec, p, raw: RwLock::new(default_state(spec)), raw_version: AtomicU64::new(0), live: Arc::default() }
+        FxParams {
+            spec,
+            p,
+            raw: RwLock::new(default_state(spec)),
+            raw_version: AtomicU64::new(0),
+            live: Arc::default(),
+        }
     }
 
     /// Setting `k`'s value for the sound (an editor edit the host has not confirmed yet wins).
@@ -78,7 +91,10 @@ impl FxParams {
     }
 
     pub fn raw_copy(&self) -> Vec<u8> {
-        self.raw.read().map(|b| b.clone()).unwrap_or_else(|_| default_state(self.spec))
+        self.raw
+            .read()
+            .map(|b| b.clone())
+            .unwrap_or_else(|_| default_state(self.spec))
     }
 
     /// The original's saved state of the current settings.
@@ -93,7 +109,11 @@ pub const STATE_FIELD: &str = "state";
 
 unsafe impl Params for FxParams {
     fn param_map(&self) -> Vec<(String, ParamPtr, String)> {
-        self.p.iter().zip(self.spec.settings).map(|(p, s)| (s.id.to_string(), p.as_ptr(), String::new())).collect()
+        self.p
+            .iter()
+            .zip(self.spec.settings)
+            .map(|(p, s)| (s.id.to_string(), p.as_ptr(), String::new()))
+            .collect()
     }
 
     fn serialize_fields(&self) -> BTreeMap<String, String> {
@@ -102,7 +122,10 @@ unsafe impl Params for FxParams {
     }
 
     fn deserialize_fields(&self, serialized: &BTreeMap<String, String>) {
-        if let Some(bytes) = serialized.get(STATE_FIELD).and_then(|s| from_hex(s.trim_matches('"'))) {
+        if let Some(bytes) = serialized
+            .get(STATE_FIELD)
+            .and_then(|s| from_hex(s.trim_matches('"')))
+        {
             self.set_raw(normalized(self.spec, bytes));
         }
     }
@@ -110,7 +133,10 @@ unsafe impl Params for FxParams {
 
 fn from_hex(s: &str) -> Option<Vec<u8>> {
     (s.len() % 2 == 0).then_some(())?;
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect()
 }
 
 fn hex(b: &[u8]) -> String {
@@ -145,8 +171,18 @@ pub fn int_of(spec: &Spec, k: usize) -> usize {
 /// The ints the saved state has for its settings (after the version field): one per setting but a [`BYTE`] one, and
 /// those the description leaves out.
 pub fn ints(spec: &Spec) -> usize {
-    let bytes = spec.fields.iter().filter(|&&i| byte_of(i).is_some()).count();
-    spec.fields.iter().filter(|&&i| byte_of(i).is_none()).map(|&i| i + 1).max().unwrap_or(0).max(spec.settings.len() - bytes)
+    let bytes = spec
+        .fields
+        .iter()
+        .filter(|&&i| byte_of(i).is_some())
+        .count();
+    spec.fields
+        .iter()
+        .filter(|&&i| byte_of(i).is_none())
+        .map(|&i| i + 1)
+        .max()
+        .unwrap_or(0)
+        .max(spec.settings.len() - bytes)
 }
 
 /// Where the settings' ints start in `b`: after the version and the head, or where the description finds them
@@ -173,7 +209,11 @@ pub fn state_len(spec: &Spec) -> usize {
 pub fn normalized(spec: &Spec, b: Vec<u8>) -> Vec<u8> {
     let version_read = spec.any_version || spec.version.is_none_or(|v| field(&b, 0) <= v);
     let whole = base(spec, &b).is_some_and(|o| b.len() >= o + 4 * ints(spec));
-    if whole && b.len() >= state_len(spec) && version_read { b } else { default_state(spec) }
+    if whole && b.len() >= state_len(spec) && version_read {
+        b
+    } else {
+        default_state(spec)
+    }
 }
 
 /// Setting `k`'s stored value.
@@ -205,12 +245,14 @@ pub fn set_setting(spec: &Spec, b: &mut [u8], k: usize, v: i32) {
 
 /// The little-endian int32 at byte `o`.
 fn int_at(b: &[u8], o: usize) -> i32 {
-    b.get(o..o + 4).map_or(0, |s| i32::from_le_bytes(s.try_into().unwrap()))
+    b.get(o..o + 4)
+        .map_or(0, |s| i32::from_le_bytes(s.try_into().unwrap()))
 }
 
 /// Little-endian int32 field `k`.
 pub fn field(b: &[u8], k: usize) -> i32 {
-    b.get(4 * k..4 * k + 4).map_or(0, |s| i32::from_le_bytes(s.try_into().unwrap()))
+    b.get(4 * k..4 * k + 4)
+        .map_or(0, |s| i32::from_le_bytes(s.try_into().unwrap()))
 }
 
 pub fn set_field(b: &mut [u8], k: usize, v: i32) {
@@ -224,9 +266,18 @@ pub fn default_state(spec: &Spec) -> Vec<u8> {
     if let Some(blank) = spec.blank {
         return blank();
     }
-    let start = |i: usize| (0..spec.settings.len()).find(|&k| int_of(spec, k) == i).map_or(0, |k| spec.settings[k].start);
+    let start = |i: usize| {
+        (0..spec.settings.len())
+            .find(|&k| int_of(spec, k) == i)
+            .map_or(0, |k| spec.settings[k].start)
+    };
     let starts = (0..ints(spec)).flat_map(|i| start(i).to_le_bytes());
-    spec.version.iter().flat_map(|v| v.to_le_bytes()).chain(starts).chain(spec.tail.iter().copied()).collect()
+    spec.version
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .chain(starts)
+        .chain(spec.tail.iter().copied())
+        .collect()
 }
 
 /// Setting `k`'s parameter value for a stored field value.
@@ -256,7 +307,9 @@ pub fn to_fl(spec: &Spec, vals: &[i32], raw: &[u8]) -> Vec<u8> {
 
 /// Parameter values of a saved state.
 pub fn values_of(spec: &Spec, fl: &[u8]) -> Vec<i32> {
-    (0..spec.settings.len()).map(|k| decode(spec, k, setting(spec, fl, k))).collect()
+    (0..spec.settings.len())
+        .map(|k| decode(spec, k, setting(spec, fl, k)))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -284,7 +337,11 @@ pub fn snap_step(spec: &Spec, k: usize, v: i32, next: i32) -> i32 {
 
 /// A gain as `<dB>dB` with one decimal (`-INFdB` for silence).
 pub fn db_text(gain: f32) -> String {
-    if gain <= 0.0 { "-INFdB".into() } else { format!("{:.1}dB", 20.0 * f64::from(gain).log10()) }
+    if gain <= 0.0 {
+        "-INFdB".into()
+    } else {
+        format!("{:.1}dB", 20.0 * f64::from(gain).log10())
+    }
 }
 
 /// As [`db_text`], with levels just under unity (that round to -0.0) shown as 0.0dB, so the text typed back gives a
@@ -298,7 +355,11 @@ pub fn db_text_fine(gain: f32) -> String {
 
 /// The number a typed text starts with.
 pub fn leading_number(s: &str) -> Option<f64> {
-    let lead: String = s.trim().chars().take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+')).collect();
+    let lead: String = s
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+'))
+        .collect();
     lead.parse().ok()
 }
 
@@ -317,9 +378,17 @@ pub fn nearest_rising(range: (i32, i32), x: f64, number: impl Fn(i32) -> f64) ->
     // The first value whose number reaches x.
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
-        if number(mid) < x { lo = mid + 1 } else { hi = mid }
+        if number(mid) < x {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
     }
-    if lo > range.0 && (x - number(lo - 1)).abs() <= (number(lo) - x).abs() { lo - 1 } else { lo }
+    if lo > range.0 && (x - number(lo - 1)).abs() <= (number(lo) - x).abs() {
+        lo - 1
+    } else {
+        lo
+    }
 }
 
 /// A typed gain: `-inf` (or `off`) gives the value of silence, a number of dB the nearest value.
@@ -344,7 +413,11 @@ pub fn parse_db_rising(range: (i32, i32), s: &str, gain: impl Fn(i32) -> f32) ->
     let x = leading_number(&s)?;
     Some(nearest_rising(range, x, |v| {
         let g = gain(v);
-        if g > 0.0 { 20.0 * f64::from(g).log10() } else { f64::NEG_INFINITY }
+        if g > 0.0 {
+            20.0 * f64::from(g).log10()
+        } else {
+            f64::NEG_INFINITY
+        }
     }))
 }
 
@@ -354,8 +427,11 @@ pub fn parse_db_rising(range: (i32, i32), s: &str, gain: impl Fn(i32) -> f32) ->
 /// The plugin's own saved state (nih-plug JSON with the u64 length prefix of its CLAP state) for a slot's saved state.
 pub fn plugin_state_from_fl(spec: &Spec, fl: &[u8]) -> Vec<u8> {
     let b = normalized(spec, fl.to_vec());
-    let params: Vec<String> =
-        values_of(spec, &b).iter().zip(spec.settings).map(|(v, s)| format!("\"{}\":{{\"i32\":{v}}}", s.id)).collect();
+    let params: Vec<String> = values_of(spec, &b)
+        .iter()
+        .zip(spec.settings)
+        .map(|(v, s)| format!("\"{}\":{{\"i32\":{v}}}", s.id))
+        .collect();
     let state = format!(
         "{{\"version\":\"{}\",\"params\":{{{}}},\"fields\":{{\"{STATE_FIELD}\":\"\\\"{}\\\"\"}}}}",
         env!("CARGO_PKG_VERSION"),
@@ -369,13 +445,29 @@ pub fn plugin_state_from_fl(spec: &Spec, fl: &[u8]) -> Vec<u8> {
 
 /// The original's saved state for a plugin state blob (see [`plugin_state_from_fl`]); `None` when it is not one.
 pub fn fl_from_plugin_state(spec: &Spec, blob: &[u8]) -> Option<Vec<u8>> {
-    let json = if blob.len() > 8 && blob[0] != b'{' { &blob[8..] } else { blob };
+    let json = if blob.len() > 8 && blob[0] != b'{' {
+        &blob[8..]
+    } else {
+        blob
+    };
     let v: serde_json::Value = serde_json::from_str(std::str::from_utf8(json).ok()?).ok()?;
-    let raw = normalized(spec, from_hex(v.get("fields")?.get(STATE_FIELD)?.as_str()?.trim_matches('"'))?);
+    let raw = normalized(
+        spec,
+        from_hex(
+            v.get("fields")?
+                .get(STATE_FIELD)?
+                .as_str()?
+                .trim_matches('"'),
+        )?,
+    );
     let params = v.get("params")?;
     let mut vals = values_of(spec, &raw);
     for (k, s) in spec.settings.iter().enumerate() {
-        if let Some(x) = params.get(s.id).and_then(|p| p.get("i32")).and_then(|x| x.as_i64()) {
+        if let Some(x) = params
+            .get(s.id)
+            .and_then(|p| p.get("i32"))
+            .and_then(|x| x.as_i64())
+        {
             vals[k] = x as i32;
         }
     }
@@ -385,7 +477,10 @@ pub fn fl_from_plugin_state(spec: &Spec, blob: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{balance, chorus, fast_distortion, flanger, phaser, soft_clipper, stereo_enhancer, stereo_shaper, transient_processor};
+    use crate::{
+        balance, chorus, fast_distortion, flanger, phaser, soft_clipper, stereo_enhancer,
+        stereo_shaper, transient_processor,
+    };
 
     #[test]
     fn a_new_instance_starts_on_the_originals_default_and_its_state_reads_back() {
@@ -401,19 +496,46 @@ mod tests {
             assert_eq!(p.fl_state(), b);
         }
         // The engine's defaults are the originals' Default presets.
-        assert_eq!(default_state(soft_clipper::SPEC), os_engine::effects::soft_clipper::Settings::default().to_state());
-        assert_eq!(default_state(fast_distortion::SPEC), os_engine::effects::fast_dist::Settings::default().to_state());
-        assert_eq!(default_state(balance::SPEC), os_engine::effects::balance::Settings::default().to_state());
-        assert_eq!(default_state(stereo_enhancer::SPEC), os_engine::effects::stereo_enhancer::Settings::default().to_state());
+        assert_eq!(
+            default_state(soft_clipper::SPEC),
+            os_engine::effects::soft_clipper::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(fast_distortion::SPEC),
+            os_engine::effects::fast_dist::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(balance::SPEC),
+            os_engine::effects::balance::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(stereo_enhancer::SPEC),
+            os_engine::effects::stereo_enhancer::Settings::default().to_state()
+        );
         assert_eq!(
             default_state(transient_processor::SPEC),
             os_engine::effects::transient_processor::Settings::default().to_state()
         );
-        assert_eq!(default_state(chorus::SPEC), os_engine::effects::chorus::Settings::default().to_state());
-        assert_eq!(default_state(stereo_shaper::SPEC), os_engine::effects::stereo_shaper::Settings::default().to_state());
-        assert_eq!(default_state(crate::filter::SPEC), os_engine::effects::filter::Settings::default().to_state());
-        assert_eq!(default_state(flanger::SPEC), os_engine::effects::flanger::Settings::default().to_state());
-        assert_eq!(default_state(phaser::SPEC), os_engine::effects::phaser::Settings::default().to_state());
+        assert_eq!(
+            default_state(chorus::SPEC),
+            os_engine::effects::chorus::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(stereo_shaper::SPEC),
+            os_engine::effects::stereo_shaper::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(crate::filter::SPEC),
+            os_engine::effects::filter::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(flanger::SPEC),
+            os_engine::effects::flanger::Settings::default().to_state()
+        );
+        assert_eq!(
+            default_state(phaser::SPEC),
+            os_engine::effects::phaser::Settings::default().to_state()
+        );
     }
 
     /// Lemon Stereo Shaper leaves the difference output (int 6 after the version) out of its settings: it is kept as
@@ -423,7 +545,10 @@ mod tests {
         let spec = stereo_shaper::SPEC;
         assert_eq!((ints(spec), state_len(spec)), (8, 36));
         // FL's "Mid - aSide splitter": difference output 2.
-        let fl = os_engine::effects::stereo_shaper::Settings { v: [8076, 8076, 8076, 8076, 0, 0, 2, 1] }.to_state();
+        let fl = os_engine::effects::stereo_shaper::Settings {
+            v: [8076, 8076, 8076, 8076, 0, 0, 2, 1],
+        }
+        .to_state();
         let mut vals = values_of(spec, &fl);
         assert_eq!(vals, [8076, 8076, 8076, 8076, 0, 0, 1]);
         vals[6] = -1;
@@ -485,8 +610,12 @@ mod tests {
         assert_eq!(fl_from_plugin_state(spec, &blob).expect("parses"), fl);
         let p = FxParams::new(spec);
         let json: serde_json::Value = serde_json::from_slice(&blob[8..]).unwrap();
-        let fields: BTreeMap<String, String> =
-            json["fields"].as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string())).collect();
+        let fields: BTreeMap<String, String> = json["fields"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+            .collect();
         p.deserialize_fields(&fields);
         assert_eq!(*p.raw.read().unwrap(), fl);
         let mut vals = values_of(spec, &fl);
