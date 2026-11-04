@@ -2074,6 +2074,7 @@ dependencies = [
  "nih_plug",
  "os-plugkit",
  "os-ui",
+ "tiny-skia",
 ]
 
 [[package]]

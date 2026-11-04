@@ -19,10 +19,34 @@ use crate::{Card, Control, Kind, Mark, Setting, SmallFx, Sound, Spec};
 
 /// The settings in the original's order (spec §5).
 pub const SETTINGS: [Setting; dsp::PARAMS] = [
-    Setting { id: "attack", name: "Attack", range: dsp::RANGES[dsp::ATTACK], start: dsp::DEFAULTS[dsp::ATTACK], magnet: Some(80) },
-    Setting { id: "drive", name: "Drive", range: dsp::RANGES[dsp::DRIVE], start: dsp::DEFAULTS[dsp::DRIVE], magnet: Some(16) },
-    Setting { id: "release", name: "Release", range: dsp::RANGES[dsp::RELEASE], start: dsp::DEFAULTS[dsp::RELEASE], magnet: Some(80) },
-    Setting { id: "gain", name: "Gain", range: dsp::RANGES[dsp::GAIN], start: dsp::DEFAULTS[dsp::GAIN], magnet: Some(80) },
+    Setting {
+        id: "attack",
+        name: "Attack",
+        range: dsp::RANGES[dsp::ATTACK],
+        start: dsp::DEFAULTS[dsp::ATTACK],
+        magnet: Some(80),
+    },
+    Setting {
+        id: "drive",
+        name: "Drive",
+        range: dsp::RANGES[dsp::DRIVE],
+        start: dsp::DEFAULTS[dsp::DRIVE],
+        magnet: Some(16),
+    },
+    Setting {
+        id: "release",
+        name: "Release",
+        range: dsp::RANGES[dsp::RELEASE],
+        start: dsp::DEFAULTS[dsp::RELEASE],
+        magnet: Some(80),
+    },
+    Setting {
+        id: "gain",
+        name: "Gain",
+        range: dsp::RANGES[dsp::GAIN],
+        start: dsp::DEFAULTS[dsp::GAIN],
+        magnet: Some(80),
+    },
     Setting {
         id: "attack_shape",
         name: "Attack shape",
@@ -37,32 +61,135 @@ pub const SETTINGS: [Setting; dsp::PARAMS] = [
         start: dsp::DEFAULTS[dsp::RELEASE_SHAPE],
         magnet: None,
     },
-    Setting { id: "split", name: "Split frequency", range: dsp::RANGES[dsp::SPLIT], start: dsp::DEFAULTS[dsp::SPLIT], magnet: None },
-    Setting { id: "balance", name: "Split balance", range: dsp::RANGES[dsp::BALANCE], start: dsp::DEFAULTS[dsp::BALANCE], magnet: Some(80) },
-    Setting { id: "on", name: "Processing", range: dsp::RANGES[dsp::ON], start: dsp::DEFAULTS[dsp::ON], magnet: None },
+    Setting {
+        id: "split",
+        name: "Split frequency",
+        range: dsp::RANGES[dsp::SPLIT],
+        start: dsp::DEFAULTS[dsp::SPLIT],
+        magnet: None,
+    },
+    Setting {
+        id: "balance",
+        name: "Split balance",
+        range: dsp::RANGES[dsp::BALANCE],
+        start: dsp::DEFAULTS[dsp::BALANCE],
+        magnet: Some(80),
+    },
+    Setting {
+        id: "on",
+        name: "Processing",
+        range: dsp::RANGES[dsp::ON],
+        start: dsp::DEFAULTS[dsp::ON],
+        magnet: None,
+    },
 ];
 
 /// Editor layout (spec §2), as the original's: the wordmark on top; the split frequency over the processing switch,
 /// the large attack knob over its shape button, the drive over the split balance, the large release knob over its
 /// shape button and the gain; the hint well along the foot.
 const CARDS: [Card; 5] = [
-    Card { x0: 8.0, x1: 100.0, y0: 34.0, y1: 162.0, heading: "" },
-    Card { x0: 106.0, x1: 226.0, y0: 34.0, y1: 162.0, heading: "" },
-    Card { x0: 232.0, x1: 328.0, y0: 34.0, y1: 162.0, heading: "" },
-    Card { x0: 334.0, x1: 454.0, y0: 34.0, y1: 162.0, heading: "" },
-    Card { x0: 460.0, x1: 552.0, y0: 34.0, y1: 162.0, heading: "" },
+    Card {
+        x0: 8.0,
+        x1: 100.0,
+        y0: 34.0,
+        y1: 162.0,
+        heading: "",
+    },
+    Card {
+        x0: 106.0,
+        x1: 226.0,
+        y0: 34.0,
+        y1: 162.0,
+        heading: "",
+    },
+    Card {
+        x0: 232.0,
+        x1: 328.0,
+        y0: 34.0,
+        y1: 162.0,
+        heading: "",
+    },
+    Card {
+        x0: 334.0,
+        x1: 454.0,
+        y0: 34.0,
+        y1: 162.0,
+        heading: "",
+    },
+    Card {
+        x0: 460.0,
+        x1: 552.0,
+        y0: 34.0,
+        y1: 162.0,
+        heading: "",
+    },
 ];
 
 const CONTROLS: [Control; 9] = [
-    Control::Knob { id: "split", cx: 54.0, cy: 68.0, r: 18.0, caption: "SPLIT FREQ", bipolar: false },
-    Control::Choice { id: "on", x: 32.0, top: 118.0, names: &["OFF", "ON"] },
-    Control::Knob { id: "attack", cx: 166.0, cy: 80.0, r: 30.0, caption: "ATTACK", bipolar: true },
-    Control::Shape { id: "attack_shape", cx: 166.0, cy: 144.0 },
-    Control::Knob { id: "drive", cx: 280.0, cy: 66.0, r: 18.0, caption: "DRIVE", bipolar: false },
-    Control::Knob { id: "balance", cx: 280.0, cy: 122.0, r: 16.0, caption: "SPLIT BALANCE", bipolar: true },
-    Control::Knob { id: "release", cx: 394.0, cy: 80.0, r: 30.0, caption: "RELEASE", bipolar: true },
-    Control::Shape { id: "release_shape", cx: 394.0, cy: 144.0 },
-    Control::Knob { id: "gain", cx: 506.0, cy: 68.0, r: 18.0, caption: "GAIN", bipolar: true },
+    Control::Knob {
+        id: "split",
+        cx: 54.0,
+        cy: 68.0,
+        r: 18.0,
+        caption: "SPLIT FREQ",
+        bipolar: false,
+    },
+    Control::Choice {
+        id: "on",
+        x: 32.0,
+        top: 118.0,
+        names: &["OFF", "ON"],
+    },
+    Control::Knob {
+        id: "attack",
+        cx: 166.0,
+        cy: 80.0,
+        r: 30.0,
+        caption: "ATTACK",
+        bipolar: true,
+    },
+    Control::Shape {
+        id: "attack_shape",
+        cx: 166.0,
+        cy: 144.0,
+    },
+    Control::Knob {
+        id: "drive",
+        cx: 280.0,
+        cy: 66.0,
+        r: 18.0,
+        caption: "DRIVE",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "balance",
+        cx: 280.0,
+        cy: 122.0,
+        r: 16.0,
+        caption: "SPLIT BALANCE",
+        bipolar: true,
+    },
+    Control::Knob {
+        id: "release",
+        cx: 394.0,
+        cy: 80.0,
+        r: 30.0,
+        caption: "RELEASE",
+        bipolar: true,
+    },
+    Control::Shape {
+        id: "release_shape",
+        cx: 394.0,
+        cy: 144.0,
+    },
+    Control::Knob {
+        id: "gain",
+        cx: 506.0,
+        cy: 68.0,
+        r: 18.0,
+        caption: "GAIN",
+        bipolar: true,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -80,7 +207,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: 280.0, y: 17.0, anchor: 0.5, stacked: false },
+    mark: Mark {
+        x: 280.0,
+        y: 17.0,
+        anchor: 0.5,
+        stacked: false,
+    },
     hint: Some(Rect::new(8.0, 170.0, 544.0, 22.0)),
     labels: &[],
     text,
@@ -137,9 +269,16 @@ fn text(k: usize, v: i32) -> String {
 fn parse(k: usize, s: &str) -> Option<i32> {
     let range = SETTINGS[k].range;
     let low = s.trim().to_ascii_lowercase();
-    let named = |names: &[&str]| names.iter().position(|n| low.starts_with(n)).map(|i| i as i32);
+    let named = |names: &[&str]| {
+        names
+            .iter()
+            .position(|n| low.starts_with(n))
+            .map(|i| i as i32)
+    };
     match k {
-        dsp::ATTACK | dsp::RELEASE => nearest(range, leading_number(&low)?, |v| Some(f64::from(mapped(k, v)) * 100.0)),
+        dsp::ATTACK | dsp::RELEASE => nearest(range, leading_number(&low)?, |v| {
+            Some(f64::from(mapped(k, v)) * 100.0)
+        }),
         dsp::DRIVE | dsp::GAIN => parse_db(range, s, |v| mapped(k, v)),
         dsp::ATTACK_SHAPE | dsp::RELEASE_SHAPE => named(&["sharp", "mid", "slow"]),
         dsp::SPLIT => {
@@ -158,7 +297,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 struct Processor(TransientProcessor);
@@ -179,7 +320,10 @@ impl Sound for Processor {
 
 /// The plugin starts with the settings in force, as a loaded project's slot does; later changes glide.
 fn sound(rate: u32, v: &[i32]) -> Box<dyn Sound> {
-    Box::new(Processor(TransientProcessor::with_settings(rate, &settings(v))))
+    Box::new(Processor(TransientProcessor::with_settings(
+        rate,
+        &settings(v),
+    )))
 }
 
 pub struct TransientProcessorKind;
@@ -188,9 +332,14 @@ impl Kind for TransientProcessorKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-transient-processor";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's transient processor";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::TransientShaper, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::TransientShaper,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioTrPro";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
 }
 
 pub type LemonTransientProcessor = SmallFx<TransientProcessorKind>;
@@ -238,7 +387,15 @@ mod tests {
         let v = [160, 38, 160, 80, 2, 2, 0, 80, 1]; // FL's "Max transients"
         let mut s = sound(44100, &v);
         let mut e = TransientProcessor::with_settings(44100, &settings(&v));
-        let input: Vec<f32> = (0..4096).map(|i| if i % 700 < 30 { ((i as f32) * 0.7).sin() * 0.8 } else { 0.0 }).collect();
+        let input: Vec<f32> = (0..4096)
+            .map(|i| {
+                if i % 700 < 30 {
+                    ((i as f32) * 0.7).sin() * 0.8
+                } else {
+                    0.0
+                }
+            })
+            .collect();
         let (mut l, mut r) = (input.clone(), input.clone());
         s.process(&mut l, &mut r);
         let (mut el, mut er) = (input.clone(), input.clone());

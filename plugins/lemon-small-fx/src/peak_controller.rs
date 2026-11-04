@@ -29,18 +29,90 @@ pub const RAMP: usize = 11;
 
 /// The settings in the saved state's order: ten ints, then Mute and Ramp in the two bytes after them (spec §5).
 pub const SETTINGS: [Setting; 12] = [
-    Setting { id: "base", name: "Peak base", range: (0, 65536), start: 0, magnet: None },
-    Setting { id: "amount", name: "Peak volume", range: (-256, 256), start: 179, magnet: Some(0) },
-    Setting { id: "tension", name: "Peak tension", range: (-128, 128), start: 0, magnet: Some(0) },
-    Setting { id: "decay", name: "Peak decay", range: (5, 128), start: 66, magnet: None },
-    Setting { id: "lfo_base", name: "LFO base", range: (0, 65536), start: 0, magnet: None },
-    Setting { id: "lfo_amount", name: "LFO volume", range: (-256, 256), start: 0, magnet: Some(0) },
-    Setting { id: "lfo_tension", name: "LFO tension", range: (-128, 128), start: 0, magnet: Some(0) },
-    Setting { id: "speed", name: "LFO speed", range: (200, 65536), start: 32950, magnet: None },
-    Setting { id: "shape", name: "LFO shape", range: (0, 4), start: 0, magnet: None },
-    Setting { id: "phase", name: "LFO phase", range: (0, 65536), start: 0, magnet: None },
-    Setting { id: "mute", name: "Mute", range: (0, 1), start: 0, magnet: None },
-    Setting { id: "ramp", name: "Ramp controllers", range: (0, 1), start: 0, magnet: None },
+    Setting {
+        id: "base",
+        name: "Peak base",
+        range: (0, 65536),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "amount",
+        name: "Peak volume",
+        range: (-256, 256),
+        start: 179,
+        magnet: Some(0),
+    },
+    Setting {
+        id: "tension",
+        name: "Peak tension",
+        range: (-128, 128),
+        start: 0,
+        magnet: Some(0),
+    },
+    Setting {
+        id: "decay",
+        name: "Peak decay",
+        range: (5, 128),
+        start: 66,
+        magnet: None,
+    },
+    Setting {
+        id: "lfo_base",
+        name: "LFO base",
+        range: (0, 65536),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "lfo_amount",
+        name: "LFO volume",
+        range: (-256, 256),
+        start: 0,
+        magnet: Some(0),
+    },
+    Setting {
+        id: "lfo_tension",
+        name: "LFO tension",
+        range: (-128, 128),
+        start: 0,
+        magnet: Some(0),
+    },
+    Setting {
+        id: "speed",
+        name: "LFO speed",
+        range: (200, 65536),
+        start: 32950,
+        magnet: None,
+    },
+    Setting {
+        id: "shape",
+        name: "LFO shape",
+        range: (0, 4),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "phase",
+        name: "LFO phase",
+        range: (0, 65536),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "mute",
+        name: "Mute",
+        range: (0, 1),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "ramp",
+        name: "Ramp controllers",
+        range: (0, 1),
+        start: 0,
+        magnet: None,
+    },
 ];
 
 // Editor layout (spec §2): cards 6 px from the edges and 6 px apart (`Rect::span` takes the last pixel, so a card ending
@@ -72,14 +144,45 @@ const HEIGHT: f32 = HINT_Y + HINT_H + GAP;
 const MID: f32 = (TOP + FOOT + 1.0) / 2.0;
 
 const CARDS: [Card; 4] = [
-    Card { x0: PEAK_X0, x1: PEAK_X1, y0: TOP, y1: FOOT, heading: "PEAK" },
-    Card { x0: LFO_X0, x1: LFO_X1, y0: TOP, y1: FOOT, heading: "LFO" },
-    Card { x0: RAMP_X0, x1: RAMP_X1, y0: TOP, y1: FOOT, heading: "RAMP" },
-    Card { x0: MUTE_X0, x1: MUTE_X1, y0: TOP, y1: FOOT, heading: "MUTE" },
+    Card {
+        x0: PEAK_X0,
+        x1: PEAK_X1,
+        y0: TOP,
+        y1: FOOT,
+        heading: "PEAK",
+    },
+    Card {
+        x0: LFO_X0,
+        x1: LFO_X1,
+        y0: TOP,
+        y1: FOOT,
+        heading: "LFO",
+    },
+    Card {
+        x0: RAMP_X0,
+        x1: RAMP_X1,
+        y0: TOP,
+        y1: FOOT,
+        heading: "RAMP",
+    },
+    Card {
+        x0: MUTE_X0,
+        x1: MUTE_X1,
+        y0: TOP,
+        y1: FOOT,
+        heading: "MUTE",
+    },
 ];
 
 const fn knob(id: &'static str, x0: f32, k: f32, caption: &'static str, bipolar: bool) -> Control {
-    Control::Knob { id, cx: x0 + SIDE + k * PITCH, cy: KNOB_Y, r: KNOB_R, caption, bipolar }
+    Control::Knob {
+        id,
+        cx: x0 + SIDE + k * PITCH,
+        cy: KNOB_Y,
+        r: KNOB_R,
+        caption,
+        bipolar,
+    }
 }
 
 const CONTROLS: [Control; 12] = [
@@ -92,9 +195,24 @@ const CONTROLS: [Control; 12] = [
     knob("lfo_tension", LFO_X0, 2.0, "TENSION", true),
     knob("speed", LFO_X0, 3.0, "SPEED", false),
     knob("phase", LFO_X0, 4.0, "PHASE", false),
-    Control::Choice { id: "shape", x: SHAPE_X, top: MID - 40.0, names: &["SINE", "TRIANGLE", "SQUARE", "SAW", "RANDOM"] },
-    Control::Choice { id: "ramp", x: RAMP_X0 + 13.0, top: MID - 16.0, names: &["OFF", "ON"] },
-    Control::Choice { id: "mute", x: MUTE_X0 + 13.0, top: MID - 16.0, names: &["OFF", "ON"] },
+    Control::Choice {
+        id: "shape",
+        x: SHAPE_X,
+        top: MID - 40.0,
+        names: &["SINE", "TRIANGLE", "SQUARE", "SAW", "RANDOM"],
+    },
+    Control::Choice {
+        id: "ramp",
+        x: RAMP_X0 + 13.0,
+        top: MID - 16.0,
+        names: &["OFF", "ON"],
+    },
+    Control::Choice {
+        id: "mute",
+        x: MUTE_X0 + 13.0,
+        top: MID - 16.0,
+        names: &["OFF", "ON"],
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -112,7 +230,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: WIDTH - GAP, y: HINT_Y + HINT_H / 2.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: WIDTH - GAP,
+        y: HINT_Y + HINT_H / 2.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(os_ui::Rect::new(GAP, HINT_Y, WIDTH - 2.0 * GAP, HINT_H)),
     labels: &[],
     text,
@@ -169,7 +292,11 @@ fn text(k: usize, v: i32) -> String {
             b if b < 1.0 => format!("{b:.3} beats"),
             b => format!("{b:.2} beats"),
         },
-        SHAPE => dsp::SHAPES.get(v as usize).copied().unwrap_or("Sine").into(),
+        SHAPE => dsp::SHAPES
+            .get(v as usize)
+            .copied()
+            .unwrap_or("Sine")
+            .into(),
         _ => if v == 1 { "On" } else { "Off" }.into(),
     }
 }
@@ -179,11 +306,20 @@ fn parse(k: usize, s: &str) -> Option<i32> {
     let low = s.trim().to_ascii_lowercase();
     match k {
         BASE | LFO_BASE | PHASE => Some(nearest_rising(range, leading_number(&low)?, share)),
-        AMOUNT => Some(nearest_rising(range, leading_number(&low)?, |v| dsp::amount_factor(v) * 100.0)),
-        LFO_AMOUNT => Some(nearest_rising(range, leading_number(&low)?, |v| dsp::lfo_factor(v) * 100.0)),
-        TENSION | LFO_TENSION | DECAY => nearest(range, leading_number(&low)?, |v| Some(f64::from(v) / 128.0 * 100.0)),
+        AMOUNT => Some(nearest_rising(range, leading_number(&low)?, |v| {
+            dsp::amount_factor(v) * 100.0
+        })),
+        LFO_AMOUNT => Some(nearest_rising(range, leading_number(&low)?, |v| {
+            dsp::lfo_factor(v) * 100.0
+        })),
+        TENSION | LFO_TENSION | DECAY => nearest(range, leading_number(&low)?, |v| {
+            Some(f64::from(v) / 128.0 * 100.0)
+        }),
         SPEED => Some(nearest_rising(range, leading_number(&low)?, beats)),
-        SHAPE => dsp::SHAPES.iter().position(|n| n.to_ascii_lowercase().starts_with(&low) && !low.is_empty()).map(|i| i as i32),
+        SHAPE => dsp::SHAPES
+            .iter()
+            .position(|n| n.to_ascii_lowercase().starts_with(&low) && !low.is_empty())
+            .map(|i| i as i32),
         _ => match low.as_str() {
             "on" | "1" => Some(1),
             "off" | "0" => Some(0),
@@ -227,11 +363,27 @@ mod tests {
     fn the_state_is_the_originals() {
         let b = default_state(SPEC);
         assert_eq!(b, Settings::default().to_state());
-        let s = Settings { base: 12800, amount: -256, tension: 128, decay: 30, lfo_base: 12800, lfo_amount: 256, lfo_tension: -128, speed: 13000, shape: 3, phase: 12800, mute: true, ramp: true };
+        let s = Settings {
+            base: 12800,
+            amount: -256,
+            tension: 128,
+            decay: 30,
+            lfo_base: 12800,
+            lfo_amount: 256,
+            lfo_tension: -128,
+            speed: 13000,
+            shape: 3,
+            phase: 12800,
+            mute: true,
+            ramp: true,
+        };
         let fl = s.to_state();
         let v = values_of(SPEC, &fl);
         assert_eq!(settings(&v), s);
-        assert_eq!(fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &fl)), Some(fl.clone()));
+        assert_eq!(
+            fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &fl)),
+            Some(fl.clone())
+        );
         // Ramp alone on.
         let mut only_ramp = Settings::default().to_state();
         only_ramp[41] = 1;
@@ -250,7 +402,10 @@ mod tests {
         assert_eq!(text(SHAPE, 4), "Random");
         assert_eq!(parse(SHAPE, "tri"), Some(1));
         assert_eq!(parse(AMOUNT, "100%"), Some(179));
-        assert_eq!(parse(SPEED, "1 beat"), Some(nearest_rising((200, 65536), 1.0, beats)));
+        assert_eq!(
+            parse(SPEED, "1 beat"),
+            Some(nearest_rising((200, 65536), 1.0, beats))
+        );
         assert_eq!(text(SPEED, parse(SPEED, "4 beats").unwrap()), "4.00 beats");
     }
 }

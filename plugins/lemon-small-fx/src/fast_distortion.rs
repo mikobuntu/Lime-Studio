@@ -13,30 +13,105 @@ use os_engine::effects::fast_dist::{self as dsp, FastDist, Settings};
 use os_ui::{Canvas, Rect};
 
 use crate::params::{db_text, leading_number, nearest, parse_db};
-use crate::{view, Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec};
+use crate::{Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec, view};
 
 /// The settings in the original's order (spec §5).
 pub const SETTINGS: [Setting; dsp::PARAMS] = [
-    Setting { id: "pre", name: "Pre amp", range: dsp::RANGES[dsp::PRE], start: dsp::DEFAULTS[dsp::PRE], magnet: Some(128) },
-    Setting { id: "threshold", name: "Threshold", range: dsp::RANGES[dsp::THRESHOLD], start: dsp::DEFAULTS[dsp::THRESHOLD], magnet: None },
-    Setting { id: "type", name: "Type", range: dsp::RANGES[dsp::TYPE], start: dsp::DEFAULTS[dsp::TYPE], magnet: None },
-    Setting { id: "mix", name: "Mix", range: dsp::RANGES[dsp::MIX], start: dsp::DEFAULTS[dsp::MIX], magnet: None },
-    Setting { id: "post", name: "Post gain", range: dsp::RANGES[dsp::POST], start: dsp::DEFAULTS[dsp::POST], magnet: None },
+    Setting {
+        id: "pre",
+        name: "Pre amp",
+        range: dsp::RANGES[dsp::PRE],
+        start: dsp::DEFAULTS[dsp::PRE],
+        magnet: Some(128),
+    },
+    Setting {
+        id: "threshold",
+        name: "Threshold",
+        range: dsp::RANGES[dsp::THRESHOLD],
+        start: dsp::DEFAULTS[dsp::THRESHOLD],
+        magnet: None,
+    },
+    Setting {
+        id: "type",
+        name: "Type",
+        range: dsp::RANGES[dsp::TYPE],
+        start: dsp::DEFAULTS[dsp::TYPE],
+        magnet: None,
+    },
+    Setting {
+        id: "mix",
+        name: "Mix",
+        range: dsp::RANGES[dsp::MIX],
+        start: dsp::DEFAULTS[dsp::MIX],
+        magnet: None,
+    },
+    Setting {
+        id: "post",
+        name: "Post gain",
+        range: dsp::RANGES[dsp::POST],
+        start: dsp::DEFAULTS[dsp::POST],
+        magnet: None,
+    },
 ];
 
 /// Editor layout (spec §2), as the original's: the knobs and the type switch in a row over the wordmark, the curve at
 /// the right.
 const CARDS: [Card; 2] = [
-    Card { x0: 8.0, x1: 312.0, y0: 28.0, y1: 116.0, heading: "DISTORTION" },
-    Card { x0: 318.0, x1: 468.0, y0: 28.0, y1: 146.0, heading: "CURVE" },
+    Card {
+        x0: 8.0,
+        x1: 312.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "DISTORTION",
+    },
+    Card {
+        x0: 318.0,
+        x1: 468.0,
+        y0: 28.0,
+        y1: 146.0,
+        heading: "CURVE",
+    },
 ];
 
 const CONTROLS: [Control; 5] = [
-    Control::Knob { id: "pre", cx: 44.0, cy: 64.0, r: 20.0, caption: "PRE AMP", bipolar: false },
-    Control::Knob { id: "threshold", cx: 108.0, cy: 64.0, r: 20.0, caption: "THRESHOLD", bipolar: false },
-    Control::Choice { id: "type", x: 146.0, top: 49.0, names: &["A", "B"] },
-    Control::Knob { id: "mix", cx: 212.0, cy: 64.0, r: 20.0, caption: "MIX", bipolar: false },
-    Control::Knob { id: "post", cx: 276.0, cy: 64.0, r: 20.0, caption: "POST GAIN", bipolar: false },
+    Control::Knob {
+        id: "pre",
+        cx: 44.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "PRE AMP",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "threshold",
+        cx: 108.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "THRESHOLD",
+        bipolar: false,
+    },
+    Control::Choice {
+        id: "type",
+        x: 146.0,
+        top: 49.0,
+        names: &["A", "B"],
+    },
+    Control::Knob {
+        id: "mix",
+        cx: 212.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "MIX",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "post",
+        cx: 276.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "POST GAIN",
+        bipolar: false,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -53,8 +128,16 @@ pub const SPEC: &Spec = &Spec {
     size: (476, 154),
     cards: &CARDS,
     controls: &CONTROLS,
-    display: Some(Display { r: Rect::new(326.0, 36.0, 134.0, 102.0), draw: curve }),
-    mark: Mark { x: 312.0, y: 135.0, anchor: 1.0, stacked: false },
+    display: Some(Display {
+        r: Rect::new(326.0, 36.0, 134.0, 102.0),
+        draw: curve,
+    }),
+    mark: Mark {
+        x: 312.0,
+        y: 135.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: None,
     labels: &[],
     text,
@@ -93,7 +176,9 @@ fn parse(k: usize, s: &str) -> Option<i32> {
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 /// The transfer curve (input and output -1..1): the curve's whole 16-bit level at the input's magnitude times the
@@ -132,9 +217,14 @@ impl Kind for FastDistortionKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-fast-distortion";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's fast distortion";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Distortion, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Distortion,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioFDist";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
 }
 
 pub type LemonFastDistortion = SmallFx<FastDistortionKind>;

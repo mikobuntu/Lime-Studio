@@ -19,30 +19,128 @@ use crate::{Card, Control, Kind, Mark, Setting, SmallFx, Sound, Spec};
 
 /// The settings in the original's order (spec §5).
 pub const SETTINGS: [Setting; dsp::PARAMS] = [
-    Setting { id: "pan", name: "Pan", range: dsp::RANGES[dsp::PAN], start: dsp::DEFAULTS[dsp::PAN], magnet: Some(0) },
-    Setting { id: "volume", name: "Volume", range: dsp::RANGES[dsp::VOLUME], start: dsp::DEFAULTS[dsp::VOLUME], magnet: Some(256) },
-    Setting { id: "separation", name: "Stereo separation", range: dsp::RANGES[dsp::SEPARATION], start: dsp::DEFAULTS[dsp::SEPARATION], magnet: Some(0) },
-    Setting { id: "phase", name: "Phase offset", range: dsp::RANGES[dsp::PHASE], start: dsp::DEFAULTS[dsp::PHASE], magnet: Some(0) },
-    Setting { id: "placement", name: "Phase offset placement", range: dsp::RANGES[dsp::PLACEMENT], start: dsp::DEFAULTS[dsp::PLACEMENT], magnet: None },
-    Setting { id: "invert", name: "Inversion", range: dsp::RANGES[dsp::INVERT], start: dsp::DEFAULTS[dsp::INVERT], magnet: None },
+    Setting {
+        id: "pan",
+        name: "Pan",
+        range: dsp::RANGES[dsp::PAN],
+        start: dsp::DEFAULTS[dsp::PAN],
+        magnet: Some(0),
+    },
+    Setting {
+        id: "volume",
+        name: "Volume",
+        range: dsp::RANGES[dsp::VOLUME],
+        start: dsp::DEFAULTS[dsp::VOLUME],
+        magnet: Some(256),
+    },
+    Setting {
+        id: "separation",
+        name: "Stereo separation",
+        range: dsp::RANGES[dsp::SEPARATION],
+        start: dsp::DEFAULTS[dsp::SEPARATION],
+        magnet: Some(0),
+    },
+    Setting {
+        id: "phase",
+        name: "Phase offset",
+        range: dsp::RANGES[dsp::PHASE],
+        start: dsp::DEFAULTS[dsp::PHASE],
+        magnet: Some(0),
+    },
+    Setting {
+        id: "placement",
+        name: "Phase offset placement",
+        range: dsp::RANGES[dsp::PLACEMENT],
+        start: dsp::DEFAULTS[dsp::PLACEMENT],
+        magnet: None,
+    },
+    Setting {
+        id: "invert",
+        name: "Inversion",
+        range: dsp::RANGES[dsp::INVERT],
+        start: dsp::DEFAULTS[dsp::INVERT],
+        magnet: None,
+    },
 ];
 
 /// Editor layout (spec §2), as the original's: the separation, the phase offset between its placement and the
 /// inversion, then the pan and the volume.
 const CARDS: [Card; 4] = [
-    Card { x0: 8.0, x1: 84.0, y0: 28.0, y1: 116.0, heading: "STEREO SEP" },
-    Card { x0: 90.0, x1: 256.0, y0: 28.0, y1: 116.0, heading: "PHASE OFFSET" },
-    Card { x0: 262.0, x1: 334.0, y0: 28.0, y1: 116.0, heading: "INVERT" },
-    Card { x0: 340.0, x1: 492.0, y0: 28.0, y1: 116.0, heading: "OUTPUT" },
+    Card {
+        x0: 8.0,
+        x1: 84.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "STEREO SEP",
+    },
+    Card {
+        x0: 90.0,
+        x1: 256.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "PHASE OFFSET",
+    },
+    Card {
+        x0: 262.0,
+        x1: 334.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "INVERT",
+    },
+    Card {
+        x0: 340.0,
+        x1: 492.0,
+        y0: 28.0,
+        y1: 116.0,
+        heading: "OUTPUT",
+    },
 ];
 
 const CONTROLS: [Control; 6] = [
-    Control::Knob { id: "separation", cx: 46.0, cy: 64.0, r: 20.0, caption: "+     -", bipolar: true },
-    Control::Choice { id: "placement", x: 102.0, top: 49.0, names: &["PRE", "POST"] },
-    Control::Knob { id: "phase", cx: 206.0, cy: 62.0, r: 24.0, caption: "L       R", bipolar: true },
-    Control::Choice { id: "invert", x: 274.0, top: 41.0, names: &["NONE", "LEFT", "RIGHT"] },
-    Control::Knob { id: "pan", cx: 378.0, cy: 64.0, r: 20.0, caption: "PAN", bipolar: true },
-    Control::Knob { id: "volume", cx: 454.0, cy: 64.0, r: 20.0, caption: "VOL", bipolar: false },
+    Control::Knob {
+        id: "separation",
+        cx: 46.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "+     -",
+        bipolar: true,
+    },
+    Control::Choice {
+        id: "placement",
+        x: 102.0,
+        top: 49.0,
+        names: &["PRE", "POST"],
+    },
+    Control::Knob {
+        id: "phase",
+        cx: 206.0,
+        cy: 62.0,
+        r: 24.0,
+        caption: "L       R",
+        bipolar: true,
+    },
+    Control::Choice {
+        id: "invert",
+        x: 274.0,
+        top: 41.0,
+        names: &["NONE", "LEFT", "RIGHT"],
+    },
+    Control::Knob {
+        id: "pan",
+        cx: 378.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "PAN",
+        bipolar: true,
+    },
+    Control::Knob {
+        id: "volume",
+        cx: 454.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "VOL",
+        bipolar: false,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -60,7 +158,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: 492.0, y: 135.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: 492.0,
+        y: 135.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(Rect::new(8.0, 124.0, 484.0, 22.0)),
     labels: &[],
     text,
@@ -82,11 +185,19 @@ fn text(k: usize, v: i32) -> String {
         dsp::VOLUME => db_text(dsp::volume_gain(v)),
         dsp::SEPARATION => match v {
             0 => "None".into(),
-            v => format!("{:.1}% {}", f64::from(v.unsigned_abs()) / 128.0 * 100.0, if v < 0 { "separated" } else { "merged" }),
+            v => format!(
+                "{:.1}% {}",
+                f64::from(v.unsigned_abs()) / 128.0 * 100.0,
+                if v < 0 { "separated" } else { "merged" }
+            ),
         },
         dsp::PHASE => match v {
             0 => "Off".into(),
-            v => format!("{:.2}ms {}", phase_ms(v), if v < 0 { "left" } else { "right" }),
+            v => format!(
+                "{:.2}ms {}",
+                phase_ms(v),
+                if v < 0 { "left" } else { "right" }
+            ),
         },
         dsp::PLACEMENT => if v == dsp::PRE { "Pre" } else { "Post" }.into(),
         _ => match v {
@@ -101,23 +212,35 @@ fn text(k: usize, v: i32) -> String {
 fn parse(k: usize, s: &str) -> Option<i32> {
     let range = SETTINGS[k].range;
     let low = s.trim().to_ascii_lowercase();
-    let named = |names: &[&str]| names.iter().position(|n| low.starts_with(n)).map(|i| i as i32);
+    let named = |names: &[&str]| {
+        names
+            .iter()
+            .position(|n| low.starts_with(n))
+            .map(|i| i as i32)
+    };
     // A signed number; `neg` in the text makes it negative.
-    let signed = |neg: &str| leading_number(&low).map(|x| if low.contains(neg) { -x.abs() } else { x });
+    let signed =
+        |neg: &str| leading_number(&low).map(|x| if low.contains(neg) { -x.abs() } else { x });
     match k {
         dsp::PAN => parse_side(range, s),
         dsp::VOLUME => parse_db(range, s, dsp::volume_gain),
         dsp::SEPARATION if low.starts_with("none") => Some(0),
-        dsp::SEPARATION => nearest(range, signed("sep")?, |v| Some(f64::from(v) / 128.0 * 100.0)),
+        dsp::SEPARATION => nearest(range, signed("sep")?, |v| {
+            Some(f64::from(v) / 128.0 * 100.0)
+        }),
         dsp::PHASE if low.starts_with("off") => Some(0),
-        dsp::PHASE => nearest(range, signed("l")?, |v| Some(phase_ms(v).copysign(f64::from(v)))),
+        dsp::PHASE => nearest(range, signed("l")?, |v| {
+            Some(phase_ms(v).copysign(f64::from(v)))
+        }),
         dsp::PLACEMENT => named(&["pre", "post"]),
         _ => named(&["none", "left", "right"]),
     }
 }
 
 fn settings(v: &[i32]) -> Settings {
-    Settings { v: std::array::from_fn(|k| v[k]) }
+    Settings {
+        v: std::array::from_fn(|k| v[k]),
+    }
 }
 
 struct Enhancer(StereoEnhancer);
@@ -162,9 +285,15 @@ impl Kind for StereoEnhancerKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-stereo-enhancer";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's stereo enhancer";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Utility, ClapFeature::Mixing, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Utility,
+        ClapFeature::Mixing,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioStEnh";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Spatial];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Spatial];
 }
 
 pub type LemonStereoEnhancer = SmallFx<StereoEnhancerKind>;

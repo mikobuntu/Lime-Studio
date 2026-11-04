@@ -49,7 +49,7 @@ use os_ui::{Canvas, Color, Rect};
 use params::FxParams;
 
 /// The most settings an effect here has.
-pub const MAX: usize = 400;
+pub const MAX: usize = 512;
 
 /// One setting: the original's saved state holds it as int `k` (its place in [`Spec::settings`], unless
 /// [`Spec::fields`] maps it).
@@ -103,16 +103,20 @@ pub enum Control {
     /// A small switch box centred at (`cx`, `cy`) that steps between the range's two ends on click, lit mango on
     /// the range's top (Lime 12's crush).
     Switch { id: &'static str, cx: f32, cy: f32 },
-    /// A compact matrix of binary settings with a lane label, enable switch, and two lane controls per row.
+    /// A compact matrix of binary settings with, per row, a button that opens the row's panel, its label and an enable
+    /// switch.
     StepGrid {
         ids: &'static [&'static [&'static str]],
         labels: &'static [&'static str],
         enabled_ids: &'static [&'static str],
-        amount_ids: &'static [&'static str],
-        aux_ids: &'static [&'static str],
         columns: usize,
         rows: usize,
         length_id: &'static str,
+        rect: Rect,
+    },
+    /// The controls of the lane (see [`Control::StepGrid`]) whose button was clicked last, in a card over `rect`.
+    Panel {
+        lanes: &'static [PanelLane],
         rect: Rect,
     },
     /// A tile (Lemon Chorus's grid): its own card over `x0..x1`, `y0..y1`, a small dial at the left, the caption in a
@@ -154,23 +158,21 @@ impl Control {
                 .and_then(|row| row.first())
                 .copied()
                 .unwrap_or(""),
+            Control::Panel { lanes, .. } => lanes
+                .first()
+                .and_then(|lane| lane.items.first())
+                .map_or("", |item| item.id),
         }
     }
 
     pub fn contains_id(&self, id: &str) -> bool {
         match self {
             Control::StepGrid {
-                ids,
-                enabled_ids,
-                amount_ids,
-                aux_ids,
-                ..
-            } => {
-                ids.iter().any(|row| row.contains(&id))
-                    || enabled_ids.contains(&id)
-                    || amount_ids.contains(&id)
-                    || aux_ids.contains(&id)
-            }
+                ids, enabled_ids, ..
+            } => ids.iter().any(|row| row.contains(&id)) || enabled_ids.contains(&id),
+            Control::Panel { lanes, .. } => lanes
+                .iter()
+                .any(|lane| lane.items.iter().any(|item| item.id == id)),
             _ => self.id() == id,
         }
     }
@@ -181,6 +183,29 @@ impl Control {
             _ => false,
         }
     }
+}
+
+/// One control of a [`PanelLane`].
+pub enum PanelKind {
+    Knob {
+        bipolar: bool,
+    },
+    /// A radio list over the range from its minimum.
+    Choice {
+        names: &'static [&'static str],
+    },
+}
+
+pub struct PanelItem {
+    pub id: &'static str,
+    pub caption: &'static str,
+    pub kind: PanelKind,
+}
+
+/// The controls one lane of a [`Control::StepGrid`] shows in the [`Control::Panel`].
+pub struct PanelLane {
+    pub label: &'static str,
+    pub items: &'static [PanelItem],
 }
 
 /// Where the wordmark goes: the lemon mark and LEMON beside the name on one line centred at `y`, or (`stacked`) LEMON

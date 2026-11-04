@@ -32,7 +32,13 @@ pub const FIELDS: [usize; 7] = [
 ];
 
 const fn setting(id: &'static str, name: &'static str, k: usize, magnet: Option<i32>) -> Setting {
-    Setting { id, name, range: dsp::RANGES[k], start: dsp::DEFAULTS[k], magnet }
+    Setting {
+        id,
+        name,
+        range: dsp::RANGES[k],
+        start: dsp::DEFAULTS[k],
+        magnet,
+    }
 }
 
 /// The settings in the original's order, the difference output left out (spec §5).
@@ -54,8 +60,20 @@ const POSITION: usize = 6;
 /// Editor layout (spec §2), as the original's: the four level faders of the matrix (what reaches the left output, then
 /// the right), and the effects: the position, the delay and the phase.
 const CARDS: [Card; 2] = [
-    Card { x0: 8.0, x1: 216.0, y0: 28.0, y1: 306.0, heading: "MIXER MATRIX" },
-    Card { x0: 222.0, x1: 352.0, y0: 28.0, y1: 306.0, heading: "EFFECTS" },
+    Card {
+        x0: 8.0,
+        x1: 216.0,
+        y0: 28.0,
+        y1: 306.0,
+        heading: "MIXER MATRIX",
+    },
+    Card {
+        x0: 222.0,
+        x1: 352.0,
+        y0: 28.0,
+        y1: 306.0,
+        heading: "EFFECTS",
+    },
 ];
 
 /// A fader carrying the right input (the left's are lemon).
@@ -64,8 +82,21 @@ const FROM_RIGHT: Color = Color::rgb(0xcfcfcf);
 const MARKS: &[f32] = &[0.25, 0.5, 0.75];
 
 const fn level(id: &'static str, x: f32, right: bool) -> Control {
-    let (label, col) = if right { ("R", FROM_RIGHT) } else { ("L", brand::MAIN) };
-    Control::Fader { id, x, top: 66.0, bot: 270.0, label, col, bipolar: true, marks: MARKS }
+    let (label, col) = if right {
+        ("R", FROM_RIGHT)
+    } else {
+        ("L", brand::MAIN)
+    };
+    Control::Fader {
+        id,
+        x,
+        top: 66.0,
+        bot: 270.0,
+        label,
+        col,
+        bipolar: true,
+        marks: MARKS,
+    }
 }
 
 const CONTROLS: [Control; 7] = [
@@ -73,9 +104,28 @@ const CONTROLS: [Control; 7] = [
     level("left", 88.0, false),
     level("right", 136.0, true),
     level("lr", 174.0, false),
-    Control::Choice { id: "position", x: 260.0, top: 42.0, names: &["OFF", "PRE", "POST"] },
-    Control::Knob { id: "delay", cx: 287.0, cy: 140.0, r: 24.0, caption: "DELAY", bipolar: true },
-    Control::Knob { id: "phase", cx: 287.0, cy: 226.0, r: 24.0, caption: "PHASE", bipolar: true },
+    Control::Choice {
+        id: "position",
+        x: 260.0,
+        top: 42.0,
+        names: &["OFF", "PRE", "POST"],
+    },
+    Control::Knob {
+        id: "delay",
+        cx: 287.0,
+        cy: 140.0,
+        r: 24.0,
+        caption: "DELAY",
+        bipolar: true,
+    },
+    Control::Knob {
+        id: "phase",
+        cx: 287.0,
+        cy: 226.0,
+        r: 24.0,
+        caption: "PHASE",
+        bipolar: true,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -93,7 +143,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: 352.0, y: 353.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: 352.0,
+        y: 353.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(Rect::new(8.0, 314.0, 344.0, 22.0)),
     labels: &[(69.0, 286.0, "LEFT OUT"), (155.0, 286.0, "RIGHT OUT")],
     text,
@@ -133,7 +188,11 @@ fn text(k: usize, v: i32) -> String {
         },
         PHASE => match v {
             0 => "Off".into(),
-            v => format!("{} {}", crate::chorus::hz_text(f64::from(dsp::phase_hz(v))), side(v)),
+            v => format!(
+                "{} {}",
+                crate::chorus::hz_text(f64::from(dsp::phase_hz(v))),
+                side(v)
+            ),
         },
         POSITION => match v {
             v if v < 0 => "Off",
@@ -159,12 +218,19 @@ fn parse(k: usize, s: &str) -> Option<i32> {
         }
         PHASE => {
             let x = leading_number(&low)?;
-            let hz = if low.contains('k') { x.abs() * 1000.0 } else { x.abs() };
+            let hz = if low.contains('k') {
+                x.abs() * 1000.0
+            } else {
+                x.abs()
+            };
             // The frequency falls as the setting moves away from 0.
             let v = nearest_rising((1, range.1), -hz, |v| -f64::from(dsp::phase_hz(v)));
             Some(if left(x) { -v } else { v })
         }
-        POSITION => ["off", "pre", "post"].iter().position(|n| low.starts_with(n)).map(|i| i as i32 - 1),
+        POSITION => ["off", "pre", "post"]
+            .iter()
+            .position(|n| low.starts_with(n))
+            .map(|i| i as i32 - 1),
         _ => Some(((leading_number(&low)? * 128.0).round() as i32).clamp(range.0, range.1)),
     }
 }
@@ -211,9 +277,15 @@ impl Kind for StereoShaperKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-stereo-shaper";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's stereo shaper";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Utility, ClapFeature::Mixing, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Utility,
+        ClapFeature::Mixing,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioStShp";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Spatial];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Spatial];
 }
 
 pub type LemonStereoShaper = SmallFx<StereoShaperKind>;
@@ -270,7 +342,13 @@ mod tests {
         let (mut l, mut r) = (vec![0.0f32; 16], vec![0.0f32; 16]);
         r[0] = 1.0;
         s.process(&mut l, &mut r);
-        assert_eq!(r.iter().position(|&x| x != 0.0), Some(dsp::delay_samples(100, os_engine::effects::stereo_enhancer::rate_factor(96000))));
+        assert_eq!(
+            r.iter().position(|&x| x != 0.0),
+            Some(dsp::delay_samples(
+                100,
+                os_engine::effects::stereo_enhancer::rate_factor(96000)
+            ))
+        );
         // A reset empties the line.
         let (mut l, mut r) = (vec![0.0f32; 4], vec![1.0f32; 4]);
         s.process(&mut l, &mut r);

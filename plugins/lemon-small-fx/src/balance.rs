@@ -12,25 +12,69 @@ use os_engine::effects::balance::{self as dsp, Balance, Settings};
 use os_ui::{Canvas, Rect};
 
 use crate::params::{db_text, leading_number, nearest, parse_db};
-use crate::{view, Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec};
+use crate::{Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec, view};
 
 /// The settings in the original's order (spec §5).
 pub const SETTINGS: [Setting; dsp::PARAMS] = [
-    Setting { id: "balance", name: "Balance", range: dsp::RANGES[dsp::BALANCE], start: dsp::DEFAULTS[dsp::BALANCE], magnet: Some(0) },
-    Setting { id: "volume", name: "Volume", range: dsp::RANGES[dsp::VOLUME], start: dsp::DEFAULTS[dsp::VOLUME], magnet: Some(256) },
+    Setting {
+        id: "balance",
+        name: "Balance",
+        range: dsp::RANGES[dsp::BALANCE],
+        start: dsp::DEFAULTS[dsp::BALANCE],
+        magnet: Some(0),
+    },
+    Setting {
+        id: "volume",
+        name: "Volume",
+        range: dsp::RANGES[dsp::VOLUME],
+        start: dsp::DEFAULTS[dsp::VOLUME],
+        magnet: Some(256),
+    },
 ];
 
 /// Editor layout (spec §2), as the original's: the balance knob, the levels between, the volume knob; the value texts
 /// under the knobs.
 const CARDS: [Card; 3] = [
-    Card { x0: 8.0, x1: 100.0, y0: 28.0, y1: 124.0, heading: "BALANCE" },
-    Card { x0: 106.0, x1: 182.0, y0: 28.0, y1: 124.0, heading: "OUTPUT" },
-    Card { x0: 188.0, x1: 280.0, y0: 28.0, y1: 124.0, heading: "VOLUME" },
+    Card {
+        x0: 8.0,
+        x1: 100.0,
+        y0: 28.0,
+        y1: 124.0,
+        heading: "BALANCE",
+    },
+    Card {
+        x0: 106.0,
+        x1: 182.0,
+        y0: 28.0,
+        y1: 124.0,
+        heading: "OUTPUT",
+    },
+    Card {
+        x0: 188.0,
+        x1: 280.0,
+        y0: 28.0,
+        y1: 124.0,
+        heading: "VOLUME",
+    },
 ];
 
 const CONTROLS: [Control; 2] = [
-    Control::Knob { id: "balance", cx: 54.0, cy: 70.0, r: 24.0, caption: "", bipolar: true },
-    Control::Knob { id: "volume", cx: 234.0, cy: 70.0, r: 24.0, caption: "", bipolar: false },
+    Control::Knob {
+        id: "balance",
+        cx: 54.0,
+        cy: 70.0,
+        r: 24.0,
+        caption: "",
+        bipolar: true,
+    },
+    Control::Knob {
+        id: "volume",
+        cx: 234.0,
+        cy: 70.0,
+        r: 24.0,
+        caption: "",
+        bipolar: false,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -47,8 +91,16 @@ pub const SPEC: &Spec = &Spec {
     size: (288, 162),
     cards: &CARDS,
     controls: &CONTROLS,
-    display: Some(Display { r: Rect::new(114.0, 36.0, 60.0, 80.0), draw: levels }),
-    mark: Mark { x: 280.0, y: 143.0, anchor: 1.0, stacked: false },
+    display: Some(Display {
+        r: Rect::new(114.0, 36.0, 60.0, 80.0),
+        draw: levels,
+    }),
+    mark: Mark {
+        x: 280.0,
+        y: 143.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(Rect::new(8.0, 132.0, 272.0, 22.0)),
     labels: &[],
     text,
@@ -75,7 +127,11 @@ fn text(k: usize, v: i32) -> String {
 pub fn side_text(v: i32) -> String {
     match v {
         0 => "Centred".into(),
-        v => format!("{:.1}% {}", f64::from(v.unsigned_abs()) / 128.0 * 100.0, if v < 0 { "left" } else { "right" }),
+        v => format!(
+            "{:.1}% {}",
+            f64::from(v.unsigned_abs()) / 128.0 * 100.0,
+            if v < 0 { "left" } else { "right" }
+        ),
     }
 }
 
@@ -122,7 +178,10 @@ impl Sound for Bal {
 }
 
 fn sound(rate: u32, v: &[i32]) -> Box<dyn Sound> {
-    Box::new(Bal(Balance::with_settings(rate, &Settings { v: [v[0], v[1]] })))
+    Box::new(Bal(Balance::with_settings(
+        rate,
+        &Settings { v: [v[0], v[1]] },
+    )))
 }
 
 pub struct BalanceKind;
@@ -131,9 +190,15 @@ impl Kind for BalanceKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.lemon-balance";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's balance";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Utility, ClapFeature::Mixing, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Utility,
+        ClapFeature::Mixing,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"LemonStudioBalnc";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Spatial];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Spatial];
 }
 
 pub type LemonBalance = SmallFx<BalanceKind>;

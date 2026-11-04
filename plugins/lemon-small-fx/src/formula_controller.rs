@@ -9,7 +9,7 @@
 //!
 // spec: plugins/lemon-formula-controller.md, plugins/fruity-formula-controller.md
 
-use os_engine::effects::formula_ctrl::{Settings, KNOB_ONE, NEW_AFTER_KNOBS, VERSION};
+use os_engine::effects::formula_ctrl::{KNOB_ONE, NEW_AFTER_KNOBS, Settings, VERSION};
 use os_engine::formula::Formula;
 
 use crate::params::{leading_number, nearest_rising};
@@ -19,9 +19,27 @@ use crate::{Card, Control, Mark, Setting, Sound, Spec};
 pub const KNOBS: [&str; 3] = ["a", "b", "c"];
 
 pub const SETTINGS: [Setting; 3] = [
-    Setting { id: "a", name: "a parameter", range: (0, KNOB_ONE), start: 0, magnet: None },
-    Setting { id: "b", name: "b parameter", range: (0, KNOB_ONE), start: 0, magnet: None },
-    Setting { id: "c", name: "c parameter", range: (0, KNOB_ONE), start: 0, magnet: None },
+    Setting {
+        id: "a",
+        name: "a parameter",
+        range: (0, KNOB_ONE),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "b",
+        name: "b parameter",
+        range: (0, KNOB_ONE),
+        start: 0,
+        magnet: None,
+    },
+    Setting {
+        id: "c",
+        name: "c parameter",
+        range: (0, KNOB_ONE),
+        start: 0,
+        magnet: None,
+    },
 ];
 
 // Editor layout (spec §2), on Lemon Peak Controller's grid: cards 6 px from the edges and 6 px apart (`Rect::span` takes
@@ -50,19 +68,46 @@ const HINT_H: f32 = 22.0;
 const HEIGHT: f32 = HINT_Y + HINT_H + GAP;
 
 const CARDS: [Card; 2] = [
-    Card { x0: INPUT_X0, x1: INPUT_X1, y0: TOP, y1: FOOT, heading: "INPUT" },
-    Card { x0: FORMULA_X0, x1: FORMULA_X1, y0: TOP, y1: FOOT, heading: "FORMULA" },
+    Card {
+        x0: INPUT_X0,
+        x1: INPUT_X1,
+        y0: TOP,
+        y1: FOOT,
+        heading: "INPUT",
+    },
+    Card {
+        x0: FORMULA_X0,
+        x1: FORMULA_X1,
+        y0: TOP,
+        y1: FOOT,
+        heading: "FORMULA",
+    },
 ];
 
 const fn knob(id: &'static str, k: f32, caption: &'static str) -> Control {
-    Control::Knob { id, cx: INPUT_X0 + SIDE + k * PITCH, cy: KNOB_Y, r: KNOB_R, caption, bipolar: false }
+    Control::Knob {
+        id,
+        cx: INPUT_X0 + SIDE + k * PITCH,
+        cy: KNOB_Y,
+        r: KNOB_R,
+        caption,
+        bipolar: false,
+    }
 }
 
 const CONTROLS: [Control; 4] = [
     knob("a", 0.0, "A"),
     knob("b", 1.0, "B"),
     knob("c", 2.0, "C"),
-    Control::Text { id: "formula", x0: FIELD_X0, y0: FIELD_Y0, x1: FIELD_X1, y1: FIELD_Y1, show, edit },
+    Control::Text {
+        id: "formula",
+        x0: FIELD_X0,
+        y0: FIELD_Y0,
+        x1: FIELD_X1,
+        y1: FIELD_Y1,
+        show,
+        edit,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -81,7 +126,12 @@ pub const SPEC: &Spec = &Spec {
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
-    mark: Mark { x: WIDTH - GAP, y: HINT_Y + HINT_H / 2.0, anchor: 1.0, stacked: false },
+    mark: Mark {
+        x: WIDTH - GAP,
+        y: HINT_Y + HINT_H / 2.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: Some(os_ui::Rect::new(GAP, HINT_Y, WIDTH - 2.0 * GAP, HINT_H)),
     labels: &[],
     text,
@@ -134,7 +184,11 @@ fn text(_k: usize, v: i32) -> String {
 /// A typed value: a number as the formula sees it, or a percentage.
 fn parse(k: usize, s: &str) -> Option<i32> {
     let x = leading_number(s)?;
-    let x = if s.trim_end().ends_with('%') { x / 100.0 } else { x };
+    let x = if s.trim_end().ends_with('%') {
+        x / 100.0
+    } else {
+        x
+    };
     Some(nearest_rising(SETTINGS[k].range, x, share))
 }
 
@@ -155,31 +209,56 @@ fn sound(_rate: u32, _v: &[i32]) -> Box<dyn Sound> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{default_state, fl_from_plugin_state, plugin_state_from_fl, to_fl, values_of};
+    use crate::params::{
+        default_state, fl_from_plugin_state, plugin_state_from_fl, to_fl, values_of,
+    };
 
     /// The saved state is the original's: the version, the knobs, the formula and the comments, kept through the
     /// plugin's own state; editing the formula keeps the comments.
     #[test]
     fn the_state_is_the_originals() {
         assert_eq!(default_state(SPEC), Settings::default().to_state());
-        let mut st = Settings { knobs: [46592, 65536, 32768], formula: String::new(), tail: vec![0, 0] }.to_state();
+        let mut st = Settings {
+            knobs: [46592, 65536, 32768],
+            formula: String::new(),
+            tail: vec![0, 0],
+        }
+        .to_state();
         // A comment: its length in UTF-16 units, the text, a 0 after it.
         st.truncate(17);
         st.extend([2, b'h', 0, b'i', 0, 0]);
         assert_eq!(values_of(SPEC, &st), [46592, 65536, 32768]);
-        assert_eq!(fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &st)), Some(st.clone()));
+        assert_eq!(
+            fl_from_plugin_state(SPEC, &plugin_state_from_fl(SPEC, &st)),
+            Some(st.clone())
+        );
         let typed = edit(&st, " a*b+c ");
-        assert_eq!(show(&typed), ("a*b+c".to_string(), "Compiled ok".to_string()));
+        assert_eq!(
+            show(&typed),
+            ("a*b+c".to_string(), "Compiled ok".to_string())
+        );
         let s = Settings::from_state(&typed).unwrap();
-        assert_eq!((s.knobs, s.comments()), ([46592, 65536, 32768], "hi".to_string()));
-        assert_eq!(show(&edit(&st, "a*")).1, "Syntax error: function or operand has too few arguments");
+        assert_eq!(
+            (s.knobs, s.comments()),
+            ([46592, 65536, 32768], "hi".to_string())
+        );
+        assert_eq!(
+            show(&edit(&st, "a*")).1,
+            "Syntax error: function or operand has too few arguments"
+        );
         // An older version's state keeps its version.
         let mut old = st.clone();
         old[0] = 2;
         assert_eq!(&edit(&old, "b")[..4], &[2, 0, 0, 0]);
         // A knob edit writes its int and keeps the rest.
         let moved = to_fl(SPEC, &[0, 65536, 32768], &typed);
-        assert_eq!(Settings::from_state(&moved).unwrap(), Settings { knobs: [0, 65536, 32768], ..s.clone() });
+        assert_eq!(
+            Settings::from_state(&moved).unwrap(),
+            Settings {
+                knobs: [0, 65536, 32768],
+                ..s.clone()
+            }
+        );
         assert_eq!(settings(&moved, &[1, 2, 3]).knobs, [1, 2, 3]);
     }
 

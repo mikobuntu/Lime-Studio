@@ -11,9 +11,11 @@ use lemon_small_fx::params::FxParams;
 use lemon_small_fx::{Card, Control, Mark, Setting, Shared, Sound, Spec};
 use nih_plug::prelude::*;
 use os_ui::Rect;
-
 mod dsp;
+mod units;
 use dsp::{GlitchDsp, HostPosition};
+use lemon_small_fx::{PanelItem, PanelKind, PanelLane};
+use units::Unit;
 
 const LANES: usize = 11;
 const MAX_STEPS: usize = 32;
@@ -28,7 +30,31 @@ const MIX: usize = DIVISION + 1;
 const DELAY_TIME_L: usize = MIX + 1;
 const DELAY_TIME_R: usize = MIX + 2;
 const DELAY_FILTER: usize = MIX + 3;
-const PARAMS: usize = MIX + 4;
+const EXTRA_BASE: usize = MIX + 4;
+const RAND_CHANGE: usize = EXTRA_BASE;
+const DIST_TYPE: usize = EXTRA_BASE + 1;
+const DIST_LEVEL: usize = EXTRA_BASE + 2;
+const DIST_LOWCUT: usize = EXTRA_BASE + 3;
+const SHUF_ORDER: usize = EXTRA_BASE + 4;
+const SHUF_FADE: usize = EXTRA_BASE + 5;
+const STRETCH_PITCH: usize = EXTRA_BASE + 6;
+const STRETCH_SEARCH: usize = EXTRA_BASE + 7;
+const REV_LENGTH: usize = EXTRA_BASE + 8;
+const REV_PITCH: usize = EXTRA_BASE + 9;
+const RETRIG_SLIDE: usize = EXTRA_BASE + 10;
+const RETRIG_DECAY: usize = EXTRA_BASE + 11;
+const GATE_RELEASE: usize = EXTRA_BASE + 12;
+const GATE_DEPTH: usize = EXTRA_BASE + 13;
+const GATE_RATE: usize = EXTRA_BASE + 14;
+const DELAY_LEVEL: usize = EXTRA_BASE + 15;
+const LOFI_NOISE: usize = EXTRA_BASE + 16;
+const LOFI_TONE: usize = EXTRA_BASE + 17;
+const TAPE_CURVE: usize = EXTRA_BASE + 18;
+const TAPE_FINAL: usize = EXTRA_BASE + 19;
+const MOD_RATE: usize = EXTRA_BASE + 20;
+const MOD_SHAPE: usize = EXTRA_BASE + 21;
+const MOD_STEREO: usize = EXTRA_BASE + 22;
+const PARAMS: usize = MOD_STEREO + 1;
 const RANDOMIZER: usize = 0;
 const DISTORTION: usize = 1;
 const SHUFFLER: usize = 2;
@@ -40,10 +66,6 @@ const DELAY: usize = 7;
 const LOFI: usize = 8;
 const TAPE_STOP: usize = 9;
 const MODULATOR: usize = 10;
-const LANE_AMOUNTS: [usize; LANES] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const LANE_AUX: [usize; LANES] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const DELAY_MODE: usize = AUX_BASE + 7;
-const MODULATOR_MODE: usize = AUX_BASE + 10;
 const LANE_LABELS: [&str; LANES] = [
     "Randomizer",
     "Distortion",
@@ -70,6 +92,7 @@ const ENABLE_IDS: [&str; LANES] = [
     "tape_stop_on",
     "modulator_on",
 ];
+#[cfg(test)]
 const AMOUNT_IDS: [&str; LANES] = [
     "randomizer_amount",
     "distortion_amount",
@@ -83,6 +106,7 @@ const AMOUNT_IDS: [&str; LANES] = [
     "tape_stop_amount",
     "modulator_amount",
 ];
+#[cfg(test)]
 const AUX_IDS: [&str; LANES] = [
     "randomizer_aux",
     "distortion_aux",
@@ -99,7 +123,108 @@ const AUX_IDS: [&str; LANES] = [
 const DIVISIONS: [&str; 4] = ["1/8", "1/16", "1/32", "1/64"];
 const BAR_COUNTS: [&str; 3] = ["1 bar", "2 bars", "4 bars"];
 const GRID_LENGTHS: [&str; 2] = ["16 steps", "32 steps"];
-const MODULATOR_MODES: [&str; 3] = ["AM", "Ring", "FM"];
+const CHANGE_MODES: [&str; 2] = ["Per step", "Per division"];
+const DIST_TYPES: [&str; 3] = ["Soft", "Hard", "Fold"];
+const SLICE_COUNTS: [&str; 7] = ["2", "3", "4", "6", "8", "12", "16"];
+const SLICE_VALUES: [usize; 7] = [2, 3, 4, 6, 8, 12, 16];
+const SHUFFLE_ORDERS: [&str; 4] = ["Pairs", "Reverse", "Rotate", "Random"];
+const REVERSE_LENGTHS: [&str; 4] = ["1/8 step", "1/4 step", "1/2 step", "1 step"];
+const DELAY_MODES: [&str; 2] = ["Stereo", "Ping-pong"];
+const GATE_RATES: [&str; 3] = ["x1", "x2", "x4"];
+const MODULATOR_MODES: [&str; 3] = ["AM", "Ring", "Vibrato"];
+const LFO_SHAPES: [&str; 4] = ["Sine", "Triangle", "Square", "Random"];
+
+const fn lin(lo: f64, hi: f64, prec: usize, suffix: &'static str) -> Unit {
+    Unit::Lin {
+        lo,
+        hi,
+        prec,
+        suffix,
+    }
+}
+const fn exp(lo: f64, hi: f64, prec: usize, suffix: &'static str) -> Unit {
+    Unit::Exp {
+        lo,
+        hi,
+        prec,
+        suffix,
+    }
+}
+
+const AMOUNT_UNITS: [Unit; LANES] = [
+    Unit::Percent,
+    lin(0.0, 30.0, 1, " dB"),
+    Unit::Names(&SLICE_COUNTS),
+    exp(1.0, 8.0, 2, "x"),
+    Unit::Percent,
+    Unit::Count { lo: 1, suffix: "x" },
+    lin(5.0, 100.0, 0, "%"),
+    Unit::Percent,
+    lin(16.0, 3.0, 1, " bit"),
+    lin(10.0, 100.0, 0, "% of step"),
+    Unit::Percent,
+];
+const AUX_UNITS: [Unit; LANES] = [
+    Unit::Plain,
+    exp(500.0, 20000.0, 0, " Hz"),
+    Unit::Percent,
+    exp(20.0, 300.0, 0, " ms"),
+    lin(0.5, 30.0, 1, " ms"),
+    lin(-12.0, 12.0, 2, " st"),
+    exp(0.1, 50.0, 1, " ms"),
+    Unit::Names(&DELAY_MODES),
+    exp(1.0, 64.0, 1, ":1"),
+    exp(10.0, 800.0, 0, " ms"),
+    Unit::Names(&MODULATOR_MODES),
+];
+const EXTRA_UNITS: [Unit; PARAMS - EXTRA_BASE] = [
+    Unit::Names(&CHANGE_MODES),
+    Unit::Names(&DIST_TYPES),
+    lin(-24.0, 6.0, 1, " dB"),
+    exp(20.0, 1000.0, 0, " Hz"),
+    Unit::Names(&SHUFFLE_ORDERS),
+    lin(0.5, 20.0, 1, " ms"),
+    lin(-12.0, 12.0, 2, " st"),
+    Unit::Percent,
+    Unit::Names(&REVERSE_LENGTHS),
+    lin(-12.0, 12.0, 2, " st"),
+    lin(-3.0, 3.0, 2, " st"),
+    Unit::Percent,
+    exp(0.1, 100.0, 1, " ms"),
+    Unit::Percent,
+    Unit::Names(&GATE_RATES),
+    Unit::Percent,
+    Unit::Percent,
+    exp(1000.0, 20000.0, 0, " Hz"),
+    exp(0.5, 4.0, 2, ""),
+    Unit::Percent,
+    exp(0.1, 2000.0, 1, " Hz"),
+    Unit::Names(&LFO_SHAPES),
+    lin(0.0, 180.0, 0, "°"),
+];
+
+fn unit(k: usize) -> Unit {
+    match k {
+        AMOUNT_BASE..AUX_BASE => AMOUNT_UNITS[k - AMOUNT_BASE],
+        AUX_BASE..GRID_LENGTH => AUX_UNITS[k - AUX_BASE],
+        GRID_LENGTH => Unit::Names(&GRID_LENGTHS),
+        BARS => Unit::Names(&BAR_COUNTS),
+        DIVISION => Unit::Names(&DIVISIONS),
+        DELAY_TIME_L | DELAY_TIME_R => exp(0.25, 4.0, 2, "x"),
+        DELAY_FILTER => exp(250.0, 18000.0, 0, " Hz"),
+        EXTRA_BASE..PARAMS => EXTRA_UNITS[k - EXTRA_BASE],
+        _ => Unit::Percent,
+    }
+}
+
+fn top(k: usize) -> i32 {
+    SETTINGS[k].range.1
+}
+
+/// A setting's value in its unit (milliseconds, semitones, a name's index...).
+fn value(values: &[i32], k: usize) -> f64 {
+    unit(k).value(values[k], top(k))
+}
 
 macro_rules! step_setting {
     ($lane:literal, $label:literal, $step:literal) => {
@@ -166,7 +291,7 @@ const STEP_IDS: [&[&str]; LANES] = [
 ];
 
 macro_rules! all_settings {
-    ($(($prefix:literal, $label:literal, $amount:literal, $aux:literal, $amount_start:literal, $aux_start:literal, $aux_max:literal)),+ $(,)?) => {
+    ($(($prefix:literal, $label:literal, $amount:literal, $aux:literal, $amount_max:literal, $amount_start:literal, $aux_max:literal, $aux_start:literal, $aux_magnet:expr)),+ $(,)?) => {
         [
             $(
                 step_setting!($prefix, $label, "01"), step_setting!($prefix, $label, "02"), step_setting!($prefix, $label, "03"), step_setting!($prefix, $label, "04"),
@@ -182,18 +307,41 @@ macro_rules! all_settings {
                 Setting { id: concat!($prefix, "_on"), name: concat!($label, " enabled"), range: (0, 10000), start: 0, magnet: None },
             )+
             $(
-                Setting { id: concat!($prefix, "_amount"), name: $amount, range: (0, 10000), start: $amount_start, magnet: None },
+                Setting { id: concat!($prefix, "_amount"), name: $amount, range: (0, $amount_max), start: $amount_start, magnet: None },
             )+
             $(
-                Setting { id: concat!($prefix, "_aux"), name: $aux, range: (0, $aux_max), start: $aux_start, magnet: None },
+                Setting { id: concat!($prefix, "_aux"), name: $aux, range: (0, $aux_max), start: $aux_start, magnet: $aux_magnet },
             )+
             Setting { id: "grid_length", name: "Step count", range: (0, 1), start: 0, magnet: None },
             Setting { id: "bars", name: "Pattern bars", range: (0, 2), start: 0, magnet: None },
             Setting { id: "division", name: "Sub-division", range: (0, 3), start: 1, magnet: None },
             Setting { id: "mix", name: "Mix", range: (0, 10000), start: 10000, magnet: None },
-            Setting { id: "delay_time_l", name: "Delay left", range: (0, 10000), start: 2500, magnet: None },
-            Setting { id: "delay_time_r", name: "Delay right", range: (0, 10000), start: 2500, magnet: None },
+            Setting { id: "delay_time_l", name: "Delay left", range: (0, 10000), start: 5000, magnet: Some(5000) },
+            Setting { id: "delay_time_r", name: "Delay right", range: (0, 10000), start: 5000, magnet: Some(5000) },
             Setting { id: "delay_filter", name: "Delay feedback filter", range: (0, 10000), start: 8000, magnet: None },
+            Setting { id: "randomizer_change", name: "Randomizer change", range: (0, 1), start: 0, magnet: None },
+            Setting { id: "distortion_type", name: "Distortion type", range: (0, 2), start: 0, magnet: None },
+            Setting { id: "distortion_level", name: "Distortion level", range: (0, 10000), start: 8000, magnet: Some(8000) },
+            Setting { id: "distortion_lowcut", name: "Distortion low cut", range: (0, 10000), start: 0, magnet: None },
+            Setting { id: "shuffler_order", name: "Shuffler order", range: (0, 3), start: 0, magnet: None },
+            Setting { id: "shuffler_fade", name: "Shuffler fade", range: (0, 10000), start: 3000, magnet: None },
+            Setting { id: "stretcher_pitch", name: "Stretcher pitch", range: (0, 10000), start: 5000, magnet: Some(5000) },
+            Setting { id: "stretcher_search", name: "Stretcher search", range: (0, 10000), start: 5000, magnet: None },
+            Setting { id: "reverser_length", name: "Reverser length", range: (0, 3), start: 3, magnet: None },
+            Setting { id: "reverser_pitch", name: "Reverser pitch", range: (0, 10000), start: 5000, magnet: Some(5000) },
+            Setting { id: "retrigger_slide", name: "Retrigger pitch slide", range: (0, 10000), start: 5000, magnet: Some(5000) },
+            Setting { id: "retrigger_decay", name: "Retrigger decay", range: (0, 10000), start: 0, magnet: None },
+            Setting { id: "gater_release", name: "Gater release", range: (0, 10000), start: 3000, magnet: None },
+            Setting { id: "gater_depth", name: "Gater depth", range: (0, 10000), start: 10000, magnet: None },
+            Setting { id: "gater_rate", name: "Gater rate", range: (0, 2), start: 0, magnet: None },
+            Setting { id: "delay_level", name: "Delay level", range: (0, 10000), start: 7000, magnet: None },
+            Setting { id: "lofi_noise", name: "Lofi noise", range: (0, 10000), start: 0, magnet: None },
+            Setting { id: "lofi_tone", name: "Lofi tone", range: (0, 10000), start: 10000, magnet: None },
+            Setting { id: "tape_stop_curve", name: "Tape stop curve", range: (0, 10000), start: 3333, magnet: Some(3333) },
+            Setting { id: "tape_stop_final", name: "Tape stop final speed", range: (0, 10000), start: 0, magnet: None },
+            Setting { id: "modulator_rate", name: "Modulator rate", range: (0, 10000), start: 4000, magnet: None },
+            Setting { id: "modulator_shape", name: "Modulator shape", range: (0, 3), start: 0, magnet: None },
+            Setting { id: "modulator_stereo", name: "Modulator stereo phase", range: (0, 10000), start: 0, magnet: None },
         ]
     };
 }
@@ -204,36 +352,36 @@ const SETTINGS: [Setting; PARAMS] = all_settings!(
         "Randomizer",
         "Probability",
         "Seed",
-        5000,
+        10000,
+        10000,
+        10000,
         4700,
-        10000
+        None
     ),
     (
         "distortion",
         "Distortion",
         "Drive",
         "Tone",
+        10000,
         4000,
+        10000,
         7000,
-        10000
+        None
     ),
     (
-        "shuffler",
-        "Shuffler",
-        "Slice size",
-        "Shuffle",
-        5000,
-        5000,
-        10000
+        "shuffler", "Shuffler", "Slices", "Shuffle", 6, 4, 10000, 10000, None
     ),
     (
         "stretcher",
         "Stretcher",
         "Stretch",
         "Grain size",
+        10000,
+        3333,
+        10000,
         5000,
-        5000,
-        10000
+        None
     ),
     (
         "reverser",
@@ -241,42 +389,75 @@ const SETTINGS: [Setting; PARAMS] = all_settings!(
         "Reverse mix",
         "Crossfade",
         10000,
+        10000,
+        10000,
         3000,
-        10000
+        None
     ),
     (
         "retrigger",
         "Retrigger",
         "Repeats",
-        "Pitch slide",
+        "Pitch",
+        15,
+        3,
+        10000,
         5000,
-        0,
-        10000
+        Some(5000)
     ),
-    ("gater", "Gater", "Duty", "Attack", 5000, 1000, 10000),
-    ("delay", "Delay", "Feedback", "Ping-pong", 4000, 0, 1),
+    (
+        "gater", "Gater", "Duty", "Attack", 10000, 5000, 10000, 1000, None
+    ),
+    (
+        "delay",
+        "Delay",
+        "Feedback",
+        "Ping-pong",
+        10000,
+        4000,
+        1,
+        0,
+        None
+    ),
     (
         "lofi",
         "Lofi",
         "Bit depth",
         "Rate reduction",
+        10000,
         5000,
+        10000,
         4000,
-        10000
+        None
     ),
     (
         "tape_stop",
         "Tape Stop",
         "Stop time",
         "Recovery",
+        10000,
         5000,
+        10000,
         5000,
-        10000
+        None
     ),
-    ("modulator", "Modulator", "Depth", "Mode", 5000, 0, 2),
+    (
+        "modulator",
+        "Modulator",
+        "Depth",
+        "Mode",
+        10000,
+        5000,
+        2,
+        0,
+        None
+    ),
 );
 
-const CARDS: [Card; 2] = [
+const PANEL_TOP: f32 = 300.0;
+const TRANSPORT_TOP: f32 = 420.0;
+
+const CARDS: [Card; 3] = [
     Card {
         x0: 8.0,
         x1: 752.0,
@@ -287,125 +468,209 @@ const CARDS: [Card; 2] = [
     Card {
         x0: 8.0,
         x1: 752.0,
-        y0: 284.0,
-        y1: 352.0,
+        y0: PANEL_TOP,
+        y1: PANEL_TOP + 100.0,
+        heading: "",
+    },
+    Card {
+        x0: 8.0,
+        x1: 752.0,
+        y0: TRANSPORT_TOP,
+        y1: TRANSPORT_TOP + 96.0,
         heading: "TRANSPORT",
     },
 ];
 
-const CONTROLS: [Control; 8] = [
+const fn knob(id: &'static str, caption: &'static str) -> PanelItem {
+    PanelItem {
+        id,
+        caption,
+        kind: PanelKind::Knob { bipolar: false },
+    }
+}
+const fn pitch_knob(id: &'static str, caption: &'static str) -> PanelItem {
+    PanelItem {
+        id,
+        caption,
+        kind: PanelKind::Knob { bipolar: true },
+    }
+}
+const fn choice(
+    id: &'static str,
+    caption: &'static str,
+    names: &'static [&'static str],
+) -> PanelItem {
+    PanelItem {
+        id,
+        caption,
+        kind: PanelKind::Choice { names },
+    }
+}
+
+/// What each lane's button opens, in the order of the lanes: the settings that act on that effect alone.
+const PANEL_LANES: [PanelLane; LANES] = [
+    PanelLane {
+        label: "Randomizer",
+        items: &[
+            choice("randomizer_change", "CHANGE", &CHANGE_MODES),
+            knob("randomizer_amount", "PROBABILITY"),
+            knob("randomizer_aux", "SEED"),
+        ],
+    },
+    PanelLane {
+        label: "Distortion",
+        items: &[
+            choice("distortion_type", "TYPE", &DIST_TYPES),
+            knob("distortion_amount", "DRIVE"),
+            knob("distortion_lowcut", "LOW CUT"),
+            knob("distortion_aux", "TONE"),
+            knob("distortion_level", "LEVEL"),
+        ],
+    },
+    PanelLane {
+        label: "Shuffler",
+        items: &[
+            choice("shuffler_order", "ORDER", &SHUFFLE_ORDERS),
+            knob("shuffler_amount", "SLICES"),
+            knob("shuffler_aux", "SHUFFLE"),
+            knob("shuffler_fade", "FADE"),
+        ],
+    },
+    PanelLane {
+        label: "Stretcher",
+        items: &[
+            knob("stretcher_amount", "STRETCH"),
+            knob("stretcher_aux", "GRAIN"),
+            pitch_knob("stretcher_pitch", "PITCH"),
+            knob("stretcher_search", "SEARCH"),
+        ],
+    },
+    PanelLane {
+        label: "Reverser",
+        items: &[
+            choice("reverser_length", "LENGTH", &REVERSE_LENGTHS),
+            knob("reverser_amount", "MIX"),
+            knob("reverser_aux", "CROSSFADE"),
+            pitch_knob("reverser_pitch", "PITCH"),
+        ],
+    },
+    PanelLane {
+        label: "Retrigger",
+        items: &[
+            knob("retrigger_amount", "REPEATS"),
+            pitch_knob("retrigger_aux", "PITCH"),
+            pitch_knob("retrigger_slide", "SLIDE"),
+            knob("retrigger_decay", "DECAY"),
+        ],
+    },
+    PanelLane {
+        label: "Gater",
+        items: &[
+            choice("gater_rate", "RATE", &GATE_RATES),
+            knob("gater_amount", "DUTY"),
+            knob("gater_aux", "ATTACK"),
+            knob("gater_release", "RELEASE"),
+            knob("gater_depth", "DEPTH"),
+        ],
+    },
+    PanelLane {
+        label: "Delay",
+        items: &[
+            choice("delay_aux", "MODE", &DELAY_MODES),
+            knob("delay_amount", "FEEDBACK"),
+            knob("delay_time_l", "TIME L"),
+            knob("delay_time_r", "TIME R"),
+            knob("delay_filter", "TONE"),
+            knob("delay_level", "LEVEL"),
+        ],
+    },
+    PanelLane {
+        label: "Lofi",
+        items: &[
+            knob("lofi_amount", "BITS"),
+            knob("lofi_aux", "RATE"),
+            knob("lofi_noise", "NOISE"),
+            knob("lofi_tone", "TONE"),
+        ],
+    },
+    PanelLane {
+        label: "Tape Stop",
+        items: &[
+            knob("tape_stop_amount", "STOP TIME"),
+            knob("tape_stop_curve", "CURVE"),
+            knob("tape_stop_final", "STOP TO"),
+            knob("tape_stop_aux", "RECOVERY"),
+        ],
+    },
+    PanelLane {
+        label: "Modulator",
+        items: &[
+            choice("modulator_aux", "MODE", &MODULATOR_MODES),
+            choice("modulator_shape", "SHAPE", &LFO_SHAPES),
+            knob("modulator_amount", "DEPTH"),
+            knob("modulator_rate", "RATE"),
+            knob("modulator_stereo", "STEREO"),
+        ],
+    },
+];
+
+const CONTROLS: [Control; 6] = [
     Control::StepGrid {
         ids: &STEP_IDS,
         labels: &LANE_LABELS,
         enabled_ids: &ENABLE_IDS,
-        amount_ids: &AMOUNT_IDS,
-        aux_ids: &AUX_IDS,
         columns: MAX_STEPS,
         rows: LANES,
         length_id: "grid_length",
         rect: Rect::new(192.0, 42.0, 480.0, 220.0),
     },
+    Control::Panel {
+        lanes: &PANEL_LANES,
+        rect: Rect::new(8.0, PANEL_TOP, 744.0, 100.0),
+    },
     Control::Choice {
         id: "grid_length",
         x: 24.0,
-        top: 306.0,
+        top: TRANSPORT_TOP + 20.0,
         names: &GRID_LENGTHS,
     },
     Control::Choice {
         id: "bars",
         x: 176.0,
-        top: 306.0,
+        top: TRANSPORT_TOP + 20.0,
         names: &BAR_COUNTS,
     },
     Control::Choice {
         id: "division",
         x: 360.0,
-        top: 306.0,
+        top: TRANSPORT_TOP + 20.0,
         names: &DIVISIONS,
     },
     Control::Knob {
         id: "mix",
-        cx: 456.0,
-        cy: 322.0,
+        cx: 520.0,
+        cy: TRANSPORT_TOP + 44.0,
         r: 14.0,
         caption: "MIX",
         bipolar: false,
     },
-    Control::Knob {
-        id: "delay_time_l",
-        cx: 536.0,
-        cy: 322.0,
-        r: 14.0,
-        caption: "DLY L",
-        bipolar: false,
-    },
-    Control::Knob {
-        id: "delay_time_r",
-        cx: 616.0,
-        cy: 322.0,
-        r: 14.0,
-        caption: "DLY R",
-        bipolar: false,
-    },
-    Control::Knob {
-        id: "delay_filter",
-        cx: 696.0,
-        cy: 322.0,
-        r: 14.0,
-        caption: "DLY TONE",
-        bipolar: false,
-    },
 ];
-
-const LABELS: [(f32, f32, &'static str); 2] = [(690.0, 26.0, "AMT"), (729.0, 26.0, "AUX")];
 
 fn text(k: usize, value: i32) -> String {
     match k {
         0..AMOUNT_BASE => if value > 0 { "On" } else { "Off" }.into(),
-        DELAY_MODE => if value > 0 { "Ping-pong" } else { "Stereo" }.into(),
-        MODULATOR_MODE => MODULATOR_MODES[value.clamp(0, 2) as usize].into(),
-        GRID_LENGTH => GRID_LENGTHS[value.clamp(0, 1) as usize].into(),
-        BARS => BAR_COUNTS[value.clamp(0, 2) as usize].into(),
-        DIVISION => DIVISIONS[value.clamp(0, 3) as usize].into(),
-        _ => format!("{:.1}%", value as f64 / 100.0),
+        _ => unit(k).show(value, top(k)),
     }
 }
 
 fn parse(k: usize, text: &str) -> Option<i32> {
-    let text = text.trim().to_ascii_lowercase();
     match k {
-        0..AMOUNT_BASE => match text.as_str() {
+        0..AMOUNT_BASE => match text.trim().to_ascii_lowercase().as_str() {
             "on" | "1" => Some(10000),
             "off" | "0" => Some(0),
             _ => None,
         },
-        DELAY_MODE => ["stereo", "ping-pong"]
-            .iter()
-            .position(|name| *name == text)
-            .map(|i| i as i32),
-        MODULATOR_MODE => MODULATOR_MODES
-            .iter()
-            .position(|name| name.to_ascii_lowercase() == text)
-            .map(|i| i as i32),
-        GRID_LENGTH => GRID_LENGTHS
-            .iter()
-            .position(|name| name.to_ascii_lowercase() == text)
-            .map(|i| i as i32),
-        BARS => BAR_COUNTS
-            .iter()
-            .position(|name| name.to_ascii_lowercase() == text)
-            .map(|i| i as i32),
-        DIVISION => DIVISIONS
-            .iter()
-            .position(|name| name.to_ascii_lowercase() == text)
-            .map(|i| i as i32),
-        STEP_SETTINGS..=PARAMS => {
-            let value = text.trim_end_matches('%').trim().parse::<f32>().ok()?;
-            value
-                .is_finite()
-                .then_some((value * 100.0).round().clamp(0.0, 10000.0) as i32)
-        }
-        _ => None,
+        _ => unit(k).parse(text, top(k)),
     }
 }
 
@@ -424,18 +689,18 @@ pub const SPEC: &Spec = &Spec {
     tail: &[],
     blank: None,
     locate: None,
-    size: (760, 370),
+    size: (760, 538),
     cards: &CARDS,
     controls: &CONTROLS,
     display: None,
     mark: Mark {
-        x: 744.0,
-        y: 348.0,
+        x: 736.0,
+        y: TRANSPORT_TOP + 48.0,
         anchor: 1.0,
         stacked: false,
     },
     hint: None,
-    labels: &LABELS,
+    labels: &[],
     text,
     parse,
     shown: None,
@@ -811,7 +1076,9 @@ mod tests {
         v[..STEP_SETTINGS].fill(0);
         v[GATER * MAX_STEPS + 4] = 10000;
         v[ENABLE_BASE + GATER] = 10000;
-        v[AMOUNT_BASE + GATER] = 10000;
+        v[AMOUNT_BASE + GATER] = 0;
+        v[AUX_BASE + GATER] = 0;
+        v[GATE_RELEASE] = 0;
         let mut dsp = GlitchDsp::new(48000, &v);
         let mut left = vec![1.0; 1024];
         let mut right = vec![1.0; 1024];
@@ -829,5 +1096,111 @@ mod tests {
             left[0],
             left[512]
         );
+    }
+
+    fn only_lane(lane: usize) -> [i32; PARAMS] {
+        let mut v = values(10000);
+        v[..STEP_SETTINGS].fill(0);
+        v[lane * MAX_STEPS..lane * MAX_STEPS + 16].fill(10000);
+        v[ENABLE_BASE..ENABLE_BASE + LANES].fill(0);
+        v[ENABLE_BASE + lane] = 10000;
+        v
+    }
+
+    #[test]
+    fn stretcher_is_transparent_at_one_x_and_zero_semitones() {
+        let mut v = only_lane(STRETCHER);
+        v[AMOUNT_BASE + STRETCHER] = 0;
+        v[STRETCH_PITCH] = 5000;
+        let mut dsp = GlitchDsp::new(48000, &v);
+        let input: Vec<f32> = (0..48000)
+            .map(|n| (n as f32 * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 0.5)
+            .collect();
+        let (mut l, mut r) = (input.clone(), input.clone());
+        dsp.process_at(&mut l, &mut r, None);
+        let err: f32 = input[12000..]
+            .iter()
+            .zip(&l[12000..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(err < 0.05, "max deviation {err}");
+    }
+
+    #[test]
+    fn stretcher_slows_the_source_down() {
+        let mut v = only_lane(STRETCHER);
+        v[AMOUNT_BASE + STRETCHER] = 10000;
+        v[STRETCH_PITCH] = 5000;
+        let mut dsp = GlitchDsp::new(48000, &v);
+        let rate = 48000.0;
+        let input: Vec<f32> = (0..48000)
+            .map(|n| (n as f32 * 440.0 * std::f32::consts::TAU / rate).sin() * 0.5)
+            .collect();
+        let (mut l, mut r) = (input.clone(), input.clone());
+        dsp.process_at(&mut l, &mut r, None);
+        let crossings = |s: &[f32]| s.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        // Stretching leaves the pitch alone, so the tone keeps its frequency and stays audible.
+        let (a, b) = (crossings(&input[20000..40000]), crossings(&l[20000..40000]));
+        assert!(a.abs_diff(b) <= 3, "{a} vs {b}");
+        assert!(l[20000..40000].iter().any(|x| x.abs() > 0.3));
+    }
+
+    #[test]
+    fn reverser_plays_the_past_backwards() {
+        let mut v = only_lane(REVERSER);
+        v[AMOUNT_BASE + REVERSER] = 10000;
+        v[REV_PITCH] = 5000;
+        v[REV_LENGTH] = 3;
+        let mut dsp = GlitchDsp::new(48000, &v);
+        let ramp: Vec<f32> = (0..24000).map(|n| n as f32 / 24000.0).collect();
+        let (mut l, mut r) = (ramp.clone(), ramp.clone());
+        dsp.process_at(&mut l, &mut r, None);
+        let mid = &l[19000..19400];
+        assert!(
+            mid.windows(2).all(|w| w[1] < w[0]),
+            "not falling {:?}",
+            &mid[..6]
+        );
+    }
+
+    #[test]
+    fn randomizer_plays_effects_whose_own_steps_are_empty() {
+        let mut v = only_lane(RANDOMIZER);
+        v[AMOUNT_BASE + RANDOMIZER] = 10000;
+        let mut dsp = GlitchDsp::new(48000, &v);
+        let input: Vec<f32> = (0..96000)
+            .map(|n| (n as f32 * 220.0 * std::f32::consts::TAU / 48000.0).sin() * 0.5)
+            .collect();
+        let (mut l, mut r) = (input.clone(), input.clone());
+        dsp.process_at(&mut l, &mut r, None);
+        assert!(l.iter().zip(&input).any(|(a, b)| (a - b).abs() > 0.01));
+    }
+
+    #[test]
+    #[ignore]
+    fn render_editor() {
+        let Some(dir) = std::env::var_os("GLITCH_PNG") else {
+            return;
+        };
+        for lane in [0usize, 3, 7] {
+            let mut l = lemon_small_fx::editor::Logic::new(
+                &SPEC,
+                Arc::new(FxParams::new(&SPEC)),
+                Arc::new(Shared::default()),
+                None,
+            );
+            l.view.selected = lane;
+            let (w, h) = (SPEC.size.0 * 2, SPEC.size.1 * 2);
+            let mut c = os_ui::Canvas::new(w, h, 2.0).unwrap();
+            l.paint(&mut c, &os_plugkit::palette());
+            let mut px = vec![0u32; (w * h) as usize];
+            c.copy_to_xrgb(&mut px);
+            let mut pm = tiny_skia::Pixmap::new(w, h).unwrap();
+            for (o, p) in pm.data_mut().chunks_mut(4).zip(&px) {
+                o.copy_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8, 255]);
+            }
+            pm.save_png(std::path::Path::new(&dir).join(format!("lane{lane}.png")))
+                .unwrap();
+        }
     }
 }

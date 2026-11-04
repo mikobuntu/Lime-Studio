@@ -12,7 +12,7 @@ use nih_plug::prelude::*;
 use os_ui::{Canvas, Rect};
 
 use crate::params::{db_text, leading_number, nearest, parse_db};
-use crate::{view, Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec};
+use crate::{Card, Control, Display, Kind, Mark, Setting, SmallFx, Sound, Spec, view};
 
 pub const MODE: usize = 0;
 pub const DRIVE: usize = 1;
@@ -28,29 +28,117 @@ pub const FOLD_MODE: i32 = 2;
 pub const CRUSH_MODE: i32 = 3;
 
 pub const SETTINGS: [Setting; 6] = [
-    Setting { id: "mode", name: "Mode", range: (0, 3), start: CRUSH_MODE, magnet: None },
+    Setting {
+        id: "mode",
+        name: "Mode",
+        range: (0, 3),
+        start: CRUSH_MODE,
+        magnet: None,
+    },
     // Tenths: 1.0x to 10.0x.
-    Setting { id: "drive", name: "Drive", range: (10, 100), start: 15, magnet: None },
-    Setting { id: "bits", name: "Bits", range: (2, 16), start: 8, magnet: None },
+    Setting {
+        id: "drive",
+        name: "Drive",
+        range: (10, 100),
+        start: 15,
+        magnet: None,
+    },
+    Setting {
+        id: "bits",
+        name: "Bits",
+        range: (2, 16),
+        start: 8,
+        magnet: None,
+    },
     // Every sample (1) to one in 32 held.
-    Setting { id: "rate", name: "Rate", range: (1, 32), start: 4, magnet: None },
-    Setting { id: "mix", name: "Mix", range: (0, 100), start: 100, magnet: None },
+    Setting {
+        id: "rate",
+        name: "Rate",
+        range: (1, 32),
+        start: 4,
+        magnet: None,
+    },
+    Setting {
+        id: "mix",
+        name: "Mix",
+        range: (0, 100),
+        start: 100,
+        magnet: None,
+    },
     // Percent of unity: 100 = 0 dB.
-    Setting { id: "post", name: "Output", range: (0, 200), start: 90, magnet: Some(100) },
+    Setting {
+        id: "post",
+        name: "Output",
+        range: (0, 200),
+        start: 90,
+        magnet: Some(100),
+    },
 ];
 
 const CARDS: [Card; 2] = [
-    Card { x0: 8.0, x1: 408.0, y0: 28.0, y1: 124.0, heading: "CRUSHER" },
-    Card { x0: 414.0, x1: 564.0, y0: 28.0, y1: 154.0, heading: "CURVE" },
+    Card {
+        x0: 8.0,
+        x1: 408.0,
+        y0: 28.0,
+        y1: 124.0,
+        heading: "CRUSHER",
+    },
+    Card {
+        x0: 414.0,
+        x1: 564.0,
+        y0: 28.0,
+        y1: 154.0,
+        heading: "CURVE",
+    },
 ];
 
 const CONTROLS: [Control; 6] = [
-    Control::Choice { id: "mode", x: 18.0, top: 44.0, names: &["Drive", "Clip", "Fold", "Crush"] },
-    Control::Knob { id: "drive", cx: 124.0, cy: 64.0, r: 20.0, caption: "DRIVE", bipolar: false },
-    Control::Knob { id: "bits", cx: 180.0, cy: 64.0, r: 20.0, caption: "BITS", bipolar: false },
-    Control::Knob { id: "rate", cx: 236.0, cy: 64.0, r: 20.0, caption: "RATE", bipolar: false },
-    Control::Knob { id: "mix", cx: 292.0, cy: 64.0, r: 20.0, caption: "MIX", bipolar: false },
-    Control::Knob { id: "post", cx: 362.0, cy: 64.0, r: 20.0, caption: "OUTPUT", bipolar: false },
+    Control::Choice {
+        id: "mode",
+        x: 18.0,
+        top: 44.0,
+        names: &["Drive", "Clip", "Fold", "Crush"],
+    },
+    Control::Knob {
+        id: "drive",
+        cx: 124.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "DRIVE",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "bits",
+        cx: 180.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "BITS",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "rate",
+        cx: 236.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "RATE",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "mix",
+        cx: 292.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "MIX",
+        bipolar: false,
+    },
+    Control::Knob {
+        id: "post",
+        cx: 362.0,
+        cy: 64.0,
+        r: 20.0,
+        caption: "OUTPUT",
+        bipolar: false,
+    },
 ];
 
 pub const SPEC: &Spec = &Spec {
@@ -67,8 +155,16 @@ pub const SPEC: &Spec = &Spec {
     size: (572, 162),
     cards: &CARDS,
     controls: &CONTROLS,
-    display: Some(Display { r: Rect::new(422.0, 36.0, 134.0, 110.0), draw: curve }),
-    mark: Mark { x: 408.0, y: 143.0, anchor: 1.0, stacked: false },
+    display: Some(Display {
+        r: Rect::new(422.0, 36.0, 134.0, 110.0),
+        draw: curve,
+    }),
+    mark: Mark {
+        x: 408.0,
+        y: 143.0,
+        anchor: 1.0,
+        stacked: false,
+    },
     hint: None,
     labels: &[],
     text,
@@ -93,7 +189,10 @@ fn text(k: usize, v: i32) -> String {
 fn parse(k: usize, s: &str) -> Option<i32> {
     let range = SETTINGS[k].range;
     match k {
-        MODE => ["drive", "clip", "fold", "crush"].iter().position(|m| s.trim().eq_ignore_ascii_case(m)).map(|i| i as i32),
+        MODE => ["drive", "clip", "fold", "crush"]
+            .iter()
+            .position(|m| s.trim().eq_ignore_ascii_case(m))
+            .map(|i| i as i32),
         DRIVE => nearest(range, leading_number(s)?, |v| Some(f64::from(v) / 10.0)),
         RATE if s.trim().eq_ignore_ascii_case("full") => Some(1),
         RATE => {
@@ -119,13 +218,27 @@ pub struct Crusher {
 
 impl Crusher {
     pub fn new(v: &[i32]) -> Self {
-        let mut c = Crusher { mode: CRUSH_MODE, drive: 1.5, levels: 256.0, rate: 4, mix: 1.0, post: 0.9, hold: 0, held: (0.0, 0.0) };
+        let mut c = Crusher {
+            mode: CRUSH_MODE,
+            drive: 1.5,
+            levels: 256.0,
+            rate: 4,
+            mix: 1.0,
+            post: 0.9,
+            hold: 0,
+            held: (0.0, 0.0),
+        };
         c.set(v);
         c
     }
 
     pub fn set(&mut self, v: &[i32]) {
-        let get = |k: usize| v.get(k).copied().unwrap_or(SETTINGS[k].start).clamp(SETTINGS[k].range.0, SETTINGS[k].range.1);
+        let get = |k: usize| {
+            v.get(k)
+                .copied()
+                .unwrap_or(SETTINGS[k].start)
+                .clamp(SETTINGS[k].range.0, SETTINGS[k].range.1)
+        };
         self.mode = get(MODE);
         self.drive = get(DRIVE) as f32 / 10.0;
         self.levels = 2f32.powi(get(BITS));
@@ -152,7 +265,11 @@ impl Crusher {
 
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
         // The rate's hold is the crusher's: the other modes play every sample.
-        let rate = if self.mode == CRUSH_MODE { self.rate.max(1) } else { 1 };
+        let rate = if self.mode == CRUSH_MODE {
+            self.rate.max(1)
+        } else {
+            1
+        };
         let (dry, wet) = (1.0 - self.mix, self.post * self.mix);
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
             if self.hold == 0 {
@@ -200,9 +317,14 @@ impl Kind for CrusherKind {
     const SPEC: &'static Spec = SPEC;
     const CLAP_ID: &'static str = "org.openstudio.mango-crusher";
     const CLAP_DESCRIPTION: &'static str = "Lime Studio's crusher";
-    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Distortion, ClapFeature::Stereo];
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Distortion,
+        ClapFeature::Stereo,
+    ];
     const VST3_CLASS_ID: [u8; 16] = *b"MangoStudioCrush";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
 }
 
 pub type MangoCrusher = SmallFx<CrusherKind>;
@@ -213,9 +335,28 @@ mod tests {
 
     #[test]
     fn value_texts_and_typed_values() {
-        assert_eq!([text(MODE, 2), text(DRIVE, 35), text(BITS, 4), text(RATE, 1), text(RATE, 8), text(MIX, 75)], ["Fold", "3.5x", "4 bits", "Full", "1/8", "75%"]);
+        assert_eq!(
+            [
+                text(MODE, 2),
+                text(DRIVE, 35),
+                text(BITS, 4),
+                text(RATE, 1),
+                text(RATE, 8),
+                text(MIX, 75)
+            ],
+            ["Fold", "3.5x", "4 bits", "Full", "1/8", "75%"]
+        );
         assert_eq!(text(POST, 100), "0.0dB");
-        assert_eq!([parse(MODE, "crush"), parse(DRIVE, "3.5"), parse(RATE, "1/8"), parse(RATE, "full"), parse(POST, "0dB")], [Some(3), Some(35), Some(8), Some(1), Some(100)]);
+        assert_eq!(
+            [
+                parse(MODE, "crush"),
+                parse(DRIVE, "3.5"),
+                parse(RATE, "1/8"),
+                parse(RATE, "full"),
+                parse(POST, "0dB")
+            ],
+            [Some(3), Some(35), Some(8), Some(1), Some(100)]
+        );
     }
 
     /// Crush: 2 bits round to quarters, and a rate of 2 holds every other sample. Fold folds a loud signal back
@@ -232,6 +373,9 @@ mod tests {
         let drive = Crusher::new(&[DRIVE_MODE, 100, 8, 1, 100, 100]);
         assert!(drive.shape(5.0) < 1.0 && drive.shape(5.0) > 0.9);
         // Mix 0: the dry signal.
-        assert_eq!(Crusher::new(&[CRUSH_MODE, 50, 2, 1, 0, 100]).sample(0.3), 0.3);
+        assert_eq!(
+            Crusher::new(&[CRUSH_MODE, 50, 2, 1, 0, 100]).sample(0.3),
+            0.3
+        );
     }
 }

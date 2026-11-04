@@ -18,7 +18,7 @@ use os_ui::kit::lemon::{self, plug};
 use os_ui::kit::{State, inst};
 use os_ui::{Canvas, Color, Font, Rect};
 
-use crate::{Control, MAX, Mark, Spec};
+use crate::{Control, MAX, Mark, PanelKind, PanelLane, Spec};
 
 /// Dials bigger than this get the thicker arc.
 const SMALL: f32 = 19.0;
@@ -131,6 +131,8 @@ pub enum Target {
     Choice(String, i32),
     /// A text field (a click types in its text).
     Text(String),
+    /// The button that opens a lane's controls in the panel.
+    Lane(usize),
     /// The wordmark (the About menu).
     Logo,
 }
@@ -142,7 +144,7 @@ impl Target {
             Target::Knob(id) | Target::Fader(id, _) | Target::Choice(id, _) | Target::Text(id) => {
                 id
             }
-            Target::Logo => "",
+            Target::Lane(_) | Target::Logo => "",
         }
     }
 }
@@ -159,6 +161,8 @@ pub struct ViewState {
     pub mouse: Option<(f32, f32)>,
     pub pressed: Option<Target>,
     pub playhead: Option<usize>,
+    /// The lane whose controls the panel shows.
+    pub selected: usize,
     /// The saved state the text fields show ([`Control::Text`]).
     pub raw: Vec<u8>,
 }
@@ -258,8 +262,6 @@ pub fn paint(
                 ids,
                 labels,
                 enabled_ids,
-                amount_ids,
-                aux_ids,
                 columns,
                 rows,
                 length_id,
@@ -270,14 +272,13 @@ pub fn paint(
                     ids,
                     labels,
                     enabled_ids,
-                    amount_ids,
-                    aux_ids,
                     columns,
                     rows,
                     length_id,
                     rect,
                 );
             }
+            Control::Panel { lanes, rect } => panel(&mut ui, spec, lanes, rect),
             Control::Tile {
                 id,
                 x0,
@@ -516,8 +517,6 @@ fn step_grid(
     ids: &[&[&str]],
     labels: &[&str],
     enabled_ids: &[&str],
-    amount_ids: &[&str],
-    aux_ids: &[&str],
     columns: usize,
     rows: usize,
     length_id: &str,
@@ -532,11 +531,32 @@ fn step_grid(
     };
     let cell_w = rect.w / columns as f32;
     let cell_h = rect.h / rows as f32;
+    let lh = ui.c.line_height(LABEL);
 
     for row in 0..rows {
         let row_y = rect.y + row as f32 * cell_h;
+        let selected = ui.st.selected == row;
+        let target = Target::Lane(row);
+        let r = Rect::new(rect.x - 184.0, row_y + 2.0, 18.0, (cell_h - 4.0).max(10.0));
+        let state = State {
+            on: selected,
+            ..ui.state(r, &target)
+        };
+        let ink = lemon::plug_button(ui.c, r, 2.0, state);
+        ui.c.text_center(LABEL, Rect::new(r.x, r.cy() - lh / 2.0, r.w, lh), ink, ">");
+        ui.hit(r, target);
         if let Some(label) = labels.get(row) {
-            inst::caption(ui.c, ui.t, rect.x - 82.0, row_y + 3.0, label, false);
+            let w = inst::caption_width(ui.c, label, inst::CAPTION_TRACK);
+            let x = (rect.x - 160.0 + 62.0 - w / 2.0).max(rect.x - 160.0);
+            let ink = if selected { brand::MAIN } else { plug::DIM };
+            inst::caption_at(
+                ui.c,
+                x.round(),
+                (row_y + 3.0).round(),
+                ink,
+                label,
+                inst::CAPTION_TRACK,
+            );
         }
         if let Some(&id) = enabled_ids.get(row) {
             let r = Rect::new(rect.x - 36.0, row_y + 2.0, 20.0, (cell_h - 4.0).max(10.0));
@@ -586,12 +606,7 @@ fn step_grid(
             let target = Target::Choice(id.into(), if value > 0 { 0 } else { 10000 });
             let state = ui.state(r, &target);
             if state.hover || state.pressed {
-                ui.c.stroke_rrect(
-                    r.outset(-1.0),
-                    2.0,
-                    1.0,
-                    brand::TEXT.with_alpha(180),
-                );
+                ui.c.stroke_rrect(r.outset(-1.0), 2.0, 1.0, brand::TEXT.with_alpha(180));
             }
             ui.hit(r, target);
         }
@@ -602,9 +617,7 @@ fn step_grid(
                 continue;
             }
             let start = column;
-            while column + 1 < length
-                && ui.m.plain(ids[row][column + 1]).round() > 0.0
-            {
+            while column + 1 < length && ui.m.plain(ids[row][column + 1]).round() > 0.0 {
                 column += 1;
             }
             let end = column;
@@ -626,12 +639,6 @@ fn step_grid(
             }
             column += 1;
         }
-        if let Some(&id) = amount_ids.get(row) {
-            mini_fader(ui, id, rect.right() + 16.0, row_y, cell_h);
-        }
-        if let Some(&id) = aux_ids.get(row) {
-            mini_fader(ui, id, rect.right() + 47.0, row_y, cell_h);
-        }
     }
 
     for column in (4..columns).step_by(4) {
@@ -649,13 +656,56 @@ fn step_grid(
     }
 }
 
-fn mini_fader(ui: &mut Ui, id: &str, x: f32, row_y: f32, row_h: f32) {
-    let track = Rect::new(x, row_y + 3.0, 5.0, (row_h - 6.0).max(8.0));
-    ui.c.fill_rrect(track, 2.0, plug::FIELD_LINE);
-    let value = ui.m.norm(id).clamp(0.0, 1.0);
-    let y = track.bottom() - value * track.h;
-    ui.c.fill_rrect(Rect::new(x - 3.0, y - 2.0, 11.0, 4.0), 2.0, brand::MAIN);
-    ui.hit(track.outset(3.0), Target::Fader(id.into(), 100.0));
+/// The controls of the selected lane: its radio lists in columns at the left, its dials after them, each dial with its
+/// caption and value under it. The card's heading names the lane.
+fn panel(ui: &mut Ui, spec: &Spec, lanes: &[PanelLane], rect: Rect) {
+    let Some(lane) = lanes.get(ui.st.selected.min(lanes.len().saturating_sub(1))) else {
+        return;
+    };
+    heading(
+        ui,
+        rect.x,
+        rect.right(),
+        rect.y - 12.0,
+        &format!("{} CONTROLS", lane.label.to_uppercase()),
+    );
+    let mut x = rect.x + 16.0;
+    for item in lane.items {
+        if let PanelKind::Choice { names } = item.kind {
+            let min = spec.index(item.id).map_or(0, |k| spec.settings[k].range.0);
+            let widest = names
+                .iter()
+                .map(|name| ui.c.text_width(LABEL, name))
+                .fold(0.0, f32::max);
+            inst::caption_at(
+                ui.c,
+                x.round(),
+                (rect.y + 4.0).round(),
+                plug::DIM,
+                item.caption,
+                inst::CAPTION_TRACK,
+            );
+            choices(ui, item.id, x, rect.y + 20.0, min, names);
+            x += 20.0
+                + widest.max(inst::caption_width(ui.c, item.caption, inst::CAPTION_TRACK) - 20.0)
+                + 22.0;
+        }
+    }
+    let mut cx = x + 40.0;
+    for item in lane.items {
+        if let PanelKind::Knob { bipolar } = item.kind {
+            knob(ui, item.id, cx, rect.y + 38.0, 16.0, item.caption, bipolar);
+            let lh = ui.c.line_height(LABEL);
+            let text = ui.m.text(item.id);
+            ui.c.text_center(
+                LABEL,
+                Rect::new(cx - 44.0, rect.y + 38.0 + 16.0 + 22.0, 88.0, lh),
+                brand::MAIN,
+                &text,
+            );
+            cx += 88.0;
+        }
+    }
 }
 
 /// A tile of a grid (Lemon Chorus's, as the original's): a card, a small dial at the left, the caption on a field at
@@ -878,6 +928,7 @@ pub fn name(spec: &Spec, id: &str) -> String {
 pub fn hint(spec: &Spec, t: &Target, m: &dyn Model) -> String {
     match t {
         Target::Logo => spec.name.into(),
+        Target::Lane(_) => String::new(),
         t => format!("{}: {}", name(spec, t.id()), m.text(t.id())),
     }
 }

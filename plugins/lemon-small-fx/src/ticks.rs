@@ -27,7 +27,12 @@ pub fn code(v: f64) -> (u16, u8) {
 }
 
 /// Sends the outputs whose code changed since `sent` (`None`: not sent yet), at `timing`.
-pub fn send_outputs<P: Plugin>(ctx: &mut impl ProcessContext<P>, sent: &mut [Option<(u16, u8)>], values: &[f64], timing: u32) {
+pub fn send_outputs<P: Plugin>(
+    ctx: &mut impl ProcessContext<P>,
+    sent: &mut [Option<(u16, u8)>],
+    values: &[f64],
+    timing: u32,
+) {
     for (k, (&v, last)) in values.iter().zip(sent.iter_mut()).enumerate() {
         let c = code(v);
         if *last == Some(c) {
@@ -35,8 +40,17 @@ pub fn send_outputs<P: Plugin>(ctx: &mut impl ProcessContext<P>, sent: &mut [Opt
         }
         *last = Some(c);
         let channel = k as u8;
-        ctx.send_event(NoteEvent::MidiPitchBend { timing, channel, value: f32::from(c.0) / 16383.0 });
-        ctx.send_event(NoteEvent::MidiCC { timing, channel, cc: FINE_CC, value: f32::from(c.1) / 127.0 });
+        ctx.send_event(NoteEvent::MidiPitchBend {
+            timing,
+            channel,
+            value: f32::from(c.0) / 16383.0,
+        });
+        ctx.send_event(NoteEvent::MidiCC {
+            timing,
+            channel,
+            cc: FINE_CC,
+            value: f32::from(c.1) / 127.0,
+        });
     }
 }
 
@@ -54,7 +68,12 @@ pub struct Ticks {
 
 impl Ticks {
     pub fn new(rate: u32, tempo: f64) -> Ticks {
-        Ticks { clock: Clock::at_tick(rate, PPQ, tempo, 1), pos: 0, rate, tempo }
+        Ticks {
+            clock: Clock::at_tick(rate, PPQ, tempo, 1),
+            pos: 0,
+            rate,
+            tempo,
+        }
     }
 
     /// The rate and tempo of the coming ticks (a new rate starts the count again).
@@ -72,7 +91,8 @@ impl Ticks {
     pub fn sync(&mut self, ticks: f64, force: bool) {
         let spt = self.clock.samples_per_tick();
         // Where the count is, in ticks: the current tick and the frames into it.
-        let here = (self.clock.ticks() - 1) as f64 + (self.pos as f64 - self.clock.start() as f64) / spt;
+        let here =
+            (self.clock.ticks() - 1) as f64 + (self.pos as f64 - self.clock.start() as f64) / spt;
         if !force && (ticks - here).abs() < 0.05 {
             return;
         }
@@ -132,7 +152,10 @@ mod tests {
         let spt = os_engine::clock::samples_per_tick(44100, PPQ, 130.0);
         t.sync(10.0 + 100.0 / spt, false);
         assert_eq!(t.tick(), 10);
-        let end10 = Clock::frame_of_tick(44100, PPQ, 130.0, 11) - Clock::frame_of_tick(44100, PPQ, 130.0, 10) - 100 - 1;
+        let end10 = Clock::frame_of_tick(44100, PPQ, 130.0, 11)
+            - Clock::frame_of_tick(44100, PPQ, 130.0, 10)
+            - 100
+            - 1;
         assert_eq!(ends(&mut t, 200), vec![end10 as usize]);
     }
 
