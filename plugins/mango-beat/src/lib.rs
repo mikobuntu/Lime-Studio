@@ -197,7 +197,13 @@ mod tests {
             count += 1;
             let bytes = std::fs::read(&path).expect("read");
             assert!(bytes.starts_with(b"OSPRESET 1\n"), "{}: not a preset", path.display());
-            assert!(bytes.windows(18).any(|w| w == b"plugin=Lime Beat"), "{}: wrong plugin", path.display());
+            assert!(
+                bytes
+                    .windows(b"plugin=Lime Beat".len())
+                    .any(|w| w == b"plugin=Lime Beat"),
+                "{}: wrong plugin",
+                path.display()
+            );
             // The body: after the magic and the header line, the length prefix and the state JSON.
             let Some(at) = bytes.iter().enumerate().filter(|(_, b)| **b == b'\n').nth(1).map(|(i, _)| i + 1) else {
                 panic!("{}: no header", path.display())
