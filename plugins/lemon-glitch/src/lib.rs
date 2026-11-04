@@ -1190,6 +1190,13 @@ mod tests {
                 None,
             );
             l.view.selected = lane;
+            for row in 0..LANES {
+                for step in (row % 4..16).step_by(5) {
+                    for run in 0..2 {
+                        l.vals.edit_plain(STEP_IDS[row][step + run], 10000.0);
+                    }
+                }
+            }
             let (w, h) = (SPEC.size.0 * 2, SPEC.size.1 * 2);
             let mut c = os_ui::Canvas::new(w, h, 2.0).unwrap();
             l.paint(&mut c, &os_plugkit::palette());
