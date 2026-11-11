@@ -16,6 +16,7 @@ pub mod menus;
 pub mod midi_form;
 pub mod midi_page;
 pub mod mondebug;
+pub mod rolling;
 pub mod settings;
 pub mod mixer;
 pub mod piano;
@@ -252,6 +253,10 @@ pub fn paint(ui: &mut Ui, s: &State, f: &FrameInfo) -> usize {
         // it is `w / k` of them wide; what doesn't fit is left out (`toolbar::room`).
         let scale = toolbar_scale(ui.c.scale);
         ui.part(Seg::Toolbar, Rect::new(0.0, 0.0, w, band_h(s)), |ui| ui.scaled(scale, |ui, k| toolbar::paint(ui, s, f, w / k)));
+    }
+    let strip = Rect::new(0.0, work_y(s) - rolling::strip_h(s), w, rolling::strip_h(s));
+    if strip.h > 0.0 {
+        ui.part(Seg::RollStrip, strip, |ui| rolling::paint(ui, s, f));
     }
     // The floating hint bar, over every window (spec: ui/toolbar-menu.md §4).
     if s.toolbar.hint_bar {

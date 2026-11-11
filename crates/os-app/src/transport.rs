@@ -135,6 +135,9 @@ pub struct Shared {
     sounding: Mutex<Vec<(u16, u16)>>,
     /// The last samples that left the stream that plays, for the toolbar monitor and meter.
     tap: Mutex<Tap>,
+    /// The rolling sampler's tape of the newest master output (`crate::rolling`): what the strip between the
+    /// toolbar and the playlist shows and drops onto the playlist. Fed where the tap is, previews excluded.
+    rolling: crate::rolling::Rolling,
     /// The playback's last block: how the position moves through it while the device plays it (`Transport::tick`).
     pace: Mutex<Option<Pace>>,
     /// Peaks per mixer track (L, R) since the mixer meters last read them (`TrackPeaks`).
@@ -537,6 +540,8 @@ impl Transport {
         let latest = Arc::new(Mutex::new(None));
         let instruments: Instruments = Arc::new(Mutex::new(Hosts::default()));
         let shared = Arc::new(Shared { sounding: Mutex::new(Vec::with_capacity(256)), ..Shared::default() });
+        // The rolling sampler starts as the settings ask (Audio ▸ Rolling sampler).
+        shared.rolling.sync(crate::prefs::check(&crate::prefs::ROLLING_SAMPLER), crate::prefs::rolling_secs());
         let s = shared.clone();
         let thread = std::thread::Builder::new()
             .name("openstudio-audio".into())
@@ -889,6 +894,12 @@ impl Transport {
     /// The output stream's sample rate (0 until the first stream opened).
     pub fn sample_rate(&self) -> u32 {
         self.shared.sample_rate.load(Ordering::Relaxed)
+    }
+
+    /// The rolling sampler's tape (`crate::rolling`): the strip between the toolbar and the playlist reads,
+    /// renders and clears it through here.
+    pub fn rolling(&self) -> &crate::rolling::Rolling {
+        &self.shared.rolling
     }
 
     /// Output peaks (L, R) of what was heard since the last call (the toolbar meter's feed).
@@ -2698,8 +2709,14 @@ impl Renderer {
     fn render(&mut self, stereo: &mut [f32]) {
         let played = self.render_block(stereo);
         if self.tap && played {
+            let now = Instant::now();
+            let block = crate::device::blocks();
+            let rate = self.shared.sample_rate.load(Ordering::Relaxed);
             if let Ok(mut t) = self.shared.tap.try_lock() {
-                t.push(stereo, self.queue.w, crate::device::blocks(), Instant::now(), self.shared.sample_rate.load(Ordering::Relaxed));
+                t.push(stereo, self.queue.w, block, now, rate);
+            }
+            if self.shared.rolling.enabled() {
+                self.shared.rolling.push(stereo, self.queue.w, block, now, rate);
             }
         }
     }
