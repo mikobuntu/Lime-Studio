@@ -20928,6 +20928,15 @@ mod tests {
         let effects = menu.items.iter().position(|it| it.label == "Clip effects").expect("clip effects section");
         assert_eq!(menu.items[effects + 1].cmd, pl::Cmd::ClipBounce(i));
         assert!(menu.items.iter().any(|it| it.cmd == pl::Cmd::ClipUniqueSample(i)));
+        let lofi = menu.items.iter().find(|it| it.label == "Lo-Fi").expect("Lo-Fi submenu");
+        assert!(lofi.children.iter().any(|it| it.label == "SP-1200" && it.head));
+        assert!(lofi.children.iter().any(|it| it.cmd == pl::Cmd::ClipLofi(i, 0)));
+        assert!(lofi.children.iter().any(|it| it.cmd == pl::Cmd::ClipLofi(i, 4)));
+        assert!(lofi.children.iter().any(|it| it.cmd == pl::Cmd::ClipLofi(i, 9)));
+        pl::run(&mut app, pl::Cmd::ClipLofi(i, 4));
+        assert_eq!(pl::clips(&app.state)[i].effect(), os_model::ClipEffect::Lofi(4));
+        app.key(&winit::keyboard::Key::Character("z".into()), true, false);
+        assert_eq!(pl::clips(&app.state)[i].effect(), os_model::ClipEffect::None);
 
         pl::run(&mut app, pl::Cmd::ClipUnique(i));
         assert_eq!(app.state.project.channels.len(), rows + 1);

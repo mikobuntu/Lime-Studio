@@ -3060,27 +3060,17 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
                     "Lo-Fi",
                     vec![
                         PItem::new("Off", Cmd::ClipLofi(i, 10)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::None)),
-                        PItem::sub(
-                            "SP-1200",
-                            [("12-bit ZOH", 0), ("12-bit filtered", 3)]
-                                .into_iter()
-                                .map(|(label, model)| PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(model))))
-                                .collect(),
-                        ),
-                        PItem::sub(
-                            "P-6",
-                            [("44.1 kHz stereo", 4), ("22.05 kHz stereo", 1), ("11.025 kHz lo-fi", 6)]
-                                .into_iter()
-                                .map(|(label, model)| PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(model))))
-                                .collect(),
-                        ),
-                        PItem::sub(
-                            "SP-202",
-                            [("31.25 kHz filtered", 7), ("15.625 kHz raw", 8), ("7.8125 kHz adaptive", 9)]
-                                .into_iter()
-                                .map(|(label, model)| PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(model))))
-                                .collect(),
-                        ),
+                        PItem::head("SP-1200"),
+                        PItem::new("12-bit ZOH", Cmd::ClipLofi(i, 0)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(0))),
+                        PItem::new("12-bit filtered", Cmd::ClipLofi(i, 3)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(3))),
+                        PItem::head("P-6"),
+                        PItem::new("44.1 kHz stereo", Cmd::ClipLofi(i, 4)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(4))),
+                        PItem::new("22.05 kHz stereo", Cmd::ClipLofi(i, 1)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(1))),
+                        PItem::new("11.025 kHz lo-fi", Cmd::ClipLofi(i, 6)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(6))),
+                        PItem::head("SP-202"),
+                        PItem::new("31.25 kHz filtered", Cmd::ClipLofi(i, 7)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(7))),
+                        PItem::new("15.625 kHz raw", Cmd::ClipLofi(i, 8)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(8))),
+                        PItem::new("7.8125 kHz adaptive", Cmd::ClipLofi(i, 9)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(9))),
                     ],
                 ),
                 PItem::sep(),
