@@ -464,7 +464,7 @@ pub enum Cmd {
     TimeSig(bool, u8),
     /// A settings page combo declared in `crate::prefs`: that entry of its choices.
     Pref(&'static crate::prefs::Combo, usize),
-    /// The rolling sampler's wave colour menu chose: 0 = the theme's, 1 = the colour picker (`App::wave_colour_choose`).
+    /// The scrolling sampler's wave colour menu chose: 0 = the theme's, 1 = the colour picker (`App::wave_colour_choose`).
     WaveColour(usize),
     /// Settings > Info ▸ the genre menu: a genre, None for "(none)" (spec: ui/settings-choices.md "Info").
     Genre(Option<&'static str>),

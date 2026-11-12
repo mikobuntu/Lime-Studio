@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The rolling sampler's strip (issue #82), docked between the toolbar and the playlist: the newest master output as
-//! a scrolling wave; a selection on it drops onto the playlist as an audio clip. Audio ▸ Rolling sampler turns the
+//! The scrolling sampler's strip (issue #82), docked between the toolbar and the playlist: the newest master output as
+//! a scrolling wave; a selection on it drops onto the playlist as an audio clip. Audio ▸ Scrolling sampler turns the
 //! sampler on and sets the tape's length; the arrow at the left collapses the strip.
 //!
 //! `App::tick` pulls the picture (`pull`), the paint draws it and registers the hits; the interactions live on
-//! `App` (`Action::Rolling`, `Drag::RollSel`).
+//! `App` (`Action::Scrolling`, `Drag::ScrollSel`).
 
 use std::time::Instant;
 
@@ -35,9 +35,9 @@ pub enum Act {
 
 /// The strip's height in the window's px: none while the setting is off, one row collapsed, the wave tall.
 pub fn strip_h(s: &State) -> f32 {
-    if !crate::prefs::check(&crate::prefs::ROLLING_SAMPLER) {
+    if !crate::prefs::check(&crate::prefs::SCROLLING_SAMPLER) {
         0.0
-    } else if s.roll.collapsed {
+    } else if s.scroll.collapsed {
         SHORT
     } else {
         TALL
@@ -52,9 +52,9 @@ pub fn rect(s: &State, w: f32) -> Rect {
 
 /// The seconds of tape the view shows; 0 means the whole tape.
 pub fn shown(s: &State) -> f32 {
-    let cap = crate::prefs::rolling_secs();
-    if s.roll.zoom > 0.0 {
-        s.roll.zoom.min(cap.max(MIN_ZOOM))
+    let cap = crate::prefs::scrolling_secs();
+    if s.scroll.zoom > 0.0 {
+        s.scroll.zoom.min(cap.max(MIN_ZOOM))
     } else {
         cap
     }
@@ -62,15 +62,15 @@ pub fn shown(s: &State) -> f32 {
 
 /// The frame under `x` in the wave, clamped to the view's edges.
 pub fn frame_at(s: &State, x: f32) -> u64 {
-    let Some(w) = s.roll.wave else { return s.roll.from };
+    let Some(w) = s.scroll.wave else { return s.scroll.from };
     let k = ((x - w.x) / w.w.max(1.0)).clamp(0.0, 1.0) as f64;
-    s.roll.from + (s.roll.visible as f64 * k) as u64
+    s.scroll.from + (s.scroll.visible as f64 * k) as u64
 }
 
 /// The x of `frame` in the wave; frames off the view clamp to its edges.
 pub fn x_of(s: &State, frame: u64) -> f32 {
-    let Some(w) = s.roll.wave else { return 0.0 };
-    let k = (frame as f64 - s.roll.from as f64) / s.roll.visible.max(1) as f64;
+    let Some(w) = s.scroll.wave else { return 0.0 };
+    let k = (frame as f64 - s.scroll.from as f64) / s.scroll.visible.max(1) as f64;
     w.x + k.clamp(0.0, 1.0) as f32 * w.w
 }
 
@@ -79,36 +79,36 @@ pub fn x_of(s: &State, frame: u64) -> f32 {
 pub fn pull(app: &mut App) {
     let w = app.state.screen.0;
     let h = strip_h(&app.state);
-    let (oldest, heard, rate) = app.transport.rolling().window(Instant::now());
+    let (oldest, heard, rate) = app.transport.scrolling().window(Instant::now());
     let s = &mut app.state;
-    s.roll.heard = heard;
-    s.roll.rate = rate;
-    s.roll.paused = app.transport.rolling().paused();
-    s.roll.have = (oldest, heard);
+    s.scroll.heard = heard;
+    s.scroll.rate = rate;
+    s.scroll.paused = app.transport.scrolling().paused();
+    s.scroll.have = (oldest, heard);
     if h <= SHORT + 0.5 {
-        s.roll.wave = None;
+        s.scroll.wave = None;
         return;
     }
     let wave = Rect::new(ARROW_W + 1.0, super::work_y(s) - h + 1.0, (w - ARROW_W - 2.0).max(1.0), h - 2.0);
-    s.roll.wave = Some(wave);
+    s.scroll.wave = Some(wave);
     let cols = wave.w.round().max(1.0) as usize;
-    if s.roll.cols.len() != cols {
-        s.roll.cols.resize(cols, (0.0, 0.0));
+    if s.scroll.cols.len() != cols {
+        s.scroll.cols.resize(cols, (0.0, 0.0));
     }
     if rate == 0 {
-        s.roll.cols.fill((0.0, 0.0));
-        s.roll.visible = 0;
-        s.roll.from = 0;
+        s.scroll.cols.fill((0.0, 0.0));
+        s.scroll.visible = 0;
+        s.scroll.from = 0;
         return;
     }
     let visible = ((shown(s) as f64 * f64::from(rate)) as u64).max(1);
-    let from = match s.roll.hold {
+    let from = match s.scroll.hold {
         Some(held) => held,
-        None => heard.saturating_sub(visible + s.roll.pan),
+        None => heard.saturating_sub(visible + s.scroll.pan),
     };
-    s.roll.from = from;
-    s.roll.visible = visible;
-    app.transport.rolling().scan(from, visible, &mut s.roll.cols);
+    s.scroll.from = from;
+    s.scroll.visible = visible;
+    app.transport.scrolling().scan(from, visible, &mut s.scroll.cols);
 }
 
 /// Paints the strip over the window's width.
@@ -124,32 +124,32 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
 
     // The collapse arrow's column, a chevron in its middle.
     let ar = Rect::new(r.x, r.y, ARROW_W, r.h);
-    let chev = if s.roll.collapsed { ">" } else { "<" };
+    let chev = if s.scroll.collapsed { ">" } else { "<" };
     let cw = ui.c.text_width(fnt(12.0), chev);
     ui.c.text(fnt(12.0), ar.x + (ar.w - cw) / 2.0, r.y + (r.h - 12.0) / 2.0, ink, chev);
-    ui.hit(ar, Action::Rolling(Act::Collapse), if s.roll.collapsed { "Show the rolling sampler" } else { "Hide the rolling sampler" });
+    ui.hit(ar, Action::Scrolling(Act::Collapse), if s.scroll.collapsed { "Show the scrolling sampler" } else { "Hide the scrolling sampler" });
     ui.c.fill_rect(Rect::new(ar.x + ar.w, r.y, 1.0, r.h), edge);
-    if s.roll.collapsed {
+    if s.scroll.collapsed {
         return;
     }
 
-    let Some(wv) = s.roll.wave else { return };
+    let Some(wv) = s.scroll.wave else { return };
     // The wave: a column a device pixel, min/max of its frames about the middle. A column of nothing outside the
     // tape (before its oldest frame, past the newest heard) draws nothing: it is not silence, it is no tape.
     let mid = wv.y + wv.h / 2.0;
     let amp = wv.h / 2.0 - 1.0;
-    let palette = crate::prefs::index(&crate::prefs::ROLLING_WAVE_MODE);
-    let custom = crate::prefs::rolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
-    for (c, &(lo, hi)) in s.roll.cols.iter().enumerate() {
-        let at = s.roll.from + (s.roll.visible as f64 * (c as f64 + 0.5) / s.roll.cols.len().max(1) as f64) as u64;
-        if (lo, hi) == (0.0, 0.0) && !(s.roll.have.0..s.roll.have.1).contains(&at) {
+    let palette = crate::prefs::index(&crate::prefs::SCROLLING_WAVE_MODE);
+    let custom = crate::prefs::scrolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
+    for (c, &(lo, hi)) in s.scroll.cols.iter().enumerate() {
+        let at = s.scroll.from + (s.scroll.visible as f64 * (c as f64 + 0.5) / s.scroll.cols.len().max(1) as f64) as u64;
+        if (lo, hi) == (0.0, 0.0) && !(s.scroll.have.0..s.scroll.have.1).contains(&at) {
             continue;
         }
         let (lo, hi) = (lo.clamp(-1.0, 1.0), hi.clamp(-1.0, 1.0));
         let y0 = mid - hi * amp;
         let y1 = mid - lo * amp;
         if palette == 2 {
-            let hue = spectrum_hue(c, s.roll.cols.len());
+            let hue = spectrum_hue(c, s.scroll.cols.len());
             let fill = spectrum_color(hue, 0.30);
             let outline = spectrum_color(hue, 0.94);
             let top = y0.min(y1);
@@ -177,7 +177,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         }
     }
     // Paused (a Ctrl+click on the wave): the newest audio is not taken while it stands.
-    if s.roll.paused {
+    if s.scroll.paused {
         let text = "Paused";
         let tw = ui.c.text_width(fnt(11.0), text);
         let b = Rect::new(wv.right() - tw - 10.0, wv.y + 3.0, tw + 8.0, 15.0);
@@ -186,16 +186,16 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
     }
 
     // Time marks back from the newest frame, a step that keeps its labels apart.
-    if s.roll.rate > 0 && s.roll.visible > 0 {
+    if s.scroll.rate > 0 && s.scroll.visible > 0 {
         let per_px = shown(s) / wv.w.max(1.0);
         let step = [1.0f64, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0]
             .into_iter()
             .find(|&t| t / f64::from(per_px) >= 70.0)
             .unwrap_or(600.0);
-        let tape_secs = s.roll.heard as f64 / f64::from(s.roll.rate.max(1));
+        let tape_secs = s.scroll.heard as f64 / f64::from(s.scroll.rate.max(1));
         let mut t = step;
         while t < tape_secs {
-            let x = x_of(s, s.roll.heard - (t * f64::from(s.roll.rate)) as u64);
+            let x = x_of(s, s.scroll.heard - (t * f64::from(s.scroll.rate)) as u64);
             if x < wv.x - 1.0 {
                 break;
             }
@@ -208,7 +208,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
     }
 
     // The selection, its edges accented.
-    if let Some((a, b)) = s.roll.sel {
+    if let Some((a, b)) = s.scroll.sel {
         let (x0, x1) = (x_of(s, a), x_of(s, b));
         let sel = Rect::new(x0, wv.y, (x1 - x0).max(2.0), wv.h);
         ui.c.fill_rect(sel, ui.t.accent.with_alpha(56));
@@ -216,14 +216,14 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         ui.c.fill_rect(Rect::new(x1 - 1.0, wv.y, 1.0, wv.h), ui.t.accent);
     }
 
-    let hint = if s.roll.paused {
-        "Rolling sampler paused — Ctrl+click to keep taking the newest output"
-    } else if s.roll.sel.is_some() {
-        "Rolling sampler — drag the selection onto a playlist track, click beside it to select again, Ctrl+click to pause"
+    let hint = if s.scroll.paused {
+        "Scrolling sampler paused — Ctrl+click to keep taking the newest output"
+    } else if s.scroll.sel.is_some() {
+        "Scrolling sampler — drag the selection onto a playlist track, click beside it to select again, Ctrl+click to pause"
     } else {
-        "Rolling sampler — drag to select a piece of the recent output, then drag it onto a playlist track; Ctrl+click pauses"
+        "Scrolling sampler — drag to select a piece of the recent output, then drag it onto a playlist track; Ctrl+click pauses"
     };
-    ui.hit(wv, Action::Rolling(Act::Wave), hint);
+    ui.hit(wv, Action::Scrolling(Act::Wave), hint);
 }
 
 fn spectrum_color(hue: f32, alpha: f32) -> os_ui::Color {

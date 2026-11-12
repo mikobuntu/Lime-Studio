@@ -16,7 +16,7 @@ pub mod menus;
 pub mod midi_form;
 pub mod midi_page;
 pub mod mondebug;
-pub mod rolling;
+pub mod scrolling;
 pub mod settings;
 pub mod mixer;
 pub mod piano;
@@ -92,7 +92,7 @@ pub const WORK_Y: f32 = 83.0;
 /// §5), else the top band's bottom (`band_h`).
 pub fn work_y(s: &State) -> f32 {
     let toolbar = if s.toolbar.hidden { 0.0 } else { band_h(s) };
-    toolbar + rolling::strip_h(s)
+    toolbar + scrolling::strip_h(s)
 }
 
 /// Display scale of the main window's top band (the toolbar rows, `WORK_Y` tall in its own px for two rows) for a
@@ -255,9 +255,9 @@ pub fn paint(ui: &mut Ui, s: &State, f: &FrameInfo) -> usize {
         let scale = toolbar_scale(ui.c.scale);
         ui.part(Seg::Toolbar, Rect::new(0.0, 0.0, w, band_h(s)), |ui| ui.scaled(scale, |ui, k| toolbar::paint(ui, s, f, w / k)));
     }
-    let strip = Rect::new(0.0, work_y(s) - rolling::strip_h(s), w, rolling::strip_h(s));
+    let strip = Rect::new(0.0, work_y(s) - scrolling::strip_h(s), w, scrolling::strip_h(s));
     if strip.h > 0.0 {
-        ui.part(Seg::RollStrip, strip, |ui| rolling::paint(ui, s, f));
+        ui.part(Seg::ScrollStrip, strip, |ui| scrolling::paint(ui, s, f));
     }
     // The floating hint bar, over every window (spec: ui/toolbar-menu.md §4).
     if s.toolbar.hint_bar {

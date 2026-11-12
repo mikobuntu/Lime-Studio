@@ -170,8 +170,8 @@ pub enum Action {
     GlobalSnapToggle,
     /// The toolbar's scope / spectrum panel: click switches the display.
     Monitor,
-    /// The rolling sampler's strip (issue #82): the wave (select / drag out) and the collapse arrow.
-    Rolling(crate::views::rolling::Act),
+    /// The scrolling sampler's strip (issue #82): the wave (select / drag out) and the collapse arrow.
+    Scrolling(crate::views::scrolling::Act),
     /// The toolbar's CPU panel: double-click opens the Plugin performance monitor, right-click its menu.
     CpuPanel,
     /// The Plugin performance monitor's controls (spec: ui/plugin-performance.md).
@@ -632,8 +632,8 @@ pub enum Seg {
     Toolbar,
     /// The playlist's clip source list (inside `Win(Playlist)`: a scroll of the grid leaves it alone).
     PlPicker,
-    /// The rolling sampler's strip between the toolbar and the playlist.
-    RollStrip,
+    /// The scrolling sampler's strip between the toolbar and the playlist.
+    ScrollStrip,
 }
 
 /// What each part registered and where it drew in the last paint, so a partial repaint can keep the hits of the parts
@@ -1005,8 +1005,8 @@ pub enum Drag {
     Pl(crate::playlist::PlDrag),
     /// A browser item pressed (`started` once it moved far enough), spec: ui/browser.md §3.
     Browser { item: views::browser::Item, label: String, m0: (f32, f32), started: bool },
-    /// The rolling sampler's selection being drawn on the strip.
-    RollSel,
+    /// The scrolling sampler's selection being drawn on the strip.
+    ScrollSel,
     /// Channel rack (spec: ui/channel-rack.md): step painting along the start row (§9), slot range select (§8),
     /// name width (§7), pattern length (§7), a row's loop length (§15), graph editor values (§14).
     RackPaint { row: usize, on: bool, last: u32 },
@@ -1037,8 +1037,8 @@ pub struct State {
     pub project: Project,
     /// The toolbar's scope / analyzer and peak bars (fed from the audio tap in `App::tick`).
     pub monitor: crate::monitor::Monitor,
-    /// The rolling sampler's strip: its view (zoom, pan, selection) and its last pulled picture (`crate::rolling`).
-    pub roll: crate::rolling::Strip,
+    /// The scrolling sampler's strip: its view (zoom, pan, selection) and its last pulled picture (`crate::scrolling`).
+    pub scroll: crate::scrolling::Strip,
     /// The plugin database: choices, last scan, the plugin menus' lists, the plugin manager's table (spec:
     /// ui/plugin-manager.md, ui/plugin-menu.md).
     pub plugdb: crate::plugin_db::Db,
@@ -1624,7 +1624,7 @@ impl App {
                 tempo_digits: std::cell::Cell::new([f32::INFINITY; 3]),
                 message: None,
                 monitor: crate::monitor::Monitor::with_cfg(load_monitor_cfg()),
-                roll: Default::default(),
+                scroll: Default::default(),
                 cpu: crate::cpu::Cpu::saved(),
                 perf: crate::perf::Perf::default(),
                 tapper: Default::default(),
@@ -1874,8 +1874,8 @@ impl App {
                 s.history.reset();
                 s.control.reset();
                 s.control.event(&crate::control::By::User, "opened", s.path.as_ref().map_or(String::new(), |p| p.display().to_string()), Vec::new());
-                self.transport.rolling().clear();
-                s.roll = Default::default();
+                self.transport.scrolling().clear();
+                s.scroll = Default::default();
                 crate::playlist::load_view(s);
                 s.piano.dirty = true; // live notes use the new project
                 piano::center_keys(s, self.piano_grid.map_or(700.0, |g| g.h));
@@ -2471,9 +2471,9 @@ impl App {
     pub(crate) fn empty_project(&mut self) {
         self.transport.silence();
         self.reset_hosted();
-        // A fresh project: the rolling tape is session state, it empties (issue #82).
-        self.transport.rolling().clear();
-        self.state.roll = Default::default();
+        // A fresh project: the scrolling tape is session state, it empties (issue #82).
+        self.transport.scrolling().clear();
+        self.state.scroll = Default::default();
         let s = &mut self.state;
         s.project = default_project();
         crate::project_info::created(s);
@@ -4304,13 +4304,13 @@ impl App {
             }
         }
         {
-            // The rolling sampler's strip: the newest picture, and just its damage when the tape moved.
-            if crate::prefs::check(&crate::prefs::ROLLING_SAMPLER) && !self.state.roll.collapsed {
-                let (heard, rate) = self.transport.rolling().heard(std::time::Instant::now());
-                let expected_cols = (self.state.screen.0 - crate::views::rolling::ARROW_W - 2.0).max(1.0).round() as usize;
-                let layout_changed = self.state.roll.wave.is_none() || self.state.roll.cols.len() != expected_cols;
-                if heard != self.state.roll.heard || rate != self.state.roll.rate || layout_changed {
-                    crate::views::rolling::pull(self);
+            // The scrolling sampler's strip: the newest picture, and just its damage when the tape moved.
+            if crate::prefs::check(&crate::prefs::SCROLLING_SAMPLER) && !self.state.scroll.collapsed {
+                let (heard, rate) = self.transport.scrolling().heard(std::time::Instant::now());
+                let expected_cols = (self.state.screen.0 - crate::views::scrolling::ARROW_W - 2.0).max(1.0).round() as usize;
+                let layout_changed = self.state.scroll.wave.is_none() || self.state.scroll.cols.len() != expected_cols;
+                if heard != self.state.scroll.heard || rate != self.state.scroll.rate || layout_changed {
+                    crate::views::scrolling::pull(self);
                     self.damage_strip();
                 }
             }
@@ -5694,7 +5694,7 @@ impl App {
                 return;
             }
             SAct::PickRevert => return self.picker_revert(),
-            // The rolling sampler's wave colour (Audio ▸ Rolling sampler): its menu, then its picker.
+            // The scrolling sampler's wave colour (Audio ▸ Scrolling sampler): its menu, then its picker.
             SAct::WaveColourMenu(x, y) => return self.wave_colour_menu(x, y),
             SAct::WavePickClose => return self.wave_picker_close(),
             SAct::WavePickSv | SAct::WavePickHue => {
@@ -5711,7 +5711,7 @@ impl App {
                 return;
             }
             SAct::WavePickTheme => {
-                crate::prefs::set_rolling_wave_color(None);
+                crate::prefs::set_scrolling_wave_color(None);
                 self.state.settings.wave_picker = None;
                 self.state.message = Some("Wave colour: the theme's".into());
                 self.invalidate();
@@ -5925,7 +5925,7 @@ impl App {
         if let Some(d) = self.drag.clone() {
             match d {
                 Drag::Browser { item, label, m0, started } => self.browser_drag_move(label, m0, started, item),
-                Drag::RollSel { .. } => self.rolling_select_move(),
+                Drag::ScrollSel { .. } => self.scrolling_select_move(),
                 Drag::Pl(d) => {
                     if let Some(g) = self.pl_grid {
                         crate::playlist::drag_move(self, d, g);
@@ -7184,9 +7184,9 @@ impl App {
             self.drag = None;
             return self.browser_drop(item, started);
         }
-        if let Some(Drag::RollSel { .. }) = self.drag.clone() {
+        if let Some(Drag::ScrollSel { .. }) = self.drag.clone() {
             self.drag = None;
-            return self.rolling_select_end();
+            return self.scrolling_select_end();
         }
         if let Some(Drag::Pl(d)) = self.drag.clone() {
             self.drag = None;
@@ -7677,8 +7677,8 @@ impl App {
     fn wheel_act(&mut self, dx: f32, dy: f32, shift: bool, ctrl: bool) -> Option<Win> {
         let (x, y) = self.mouse;
         let area = self.top_hit(x, y).map(|h| h.action.clone());
-        if matches!(area, Some(Action::Rolling(_))) {
-            self.rolling_wheel(dy + dx, shift);
+        if matches!(area, Some(Action::Scrolling(_))) {
+            self.scrolling_wheel(dy + dx, shift);
             return None;
         }
         if matches!(area, Some(Action::BrowserList | Action::BrowserRow(_) | Action::BrowserTab(_))) {
@@ -8861,8 +8861,8 @@ impl App {
                 self.hint = Cow::Owned(self.state.monitor.hint((x - MONITOR_RECT.x - 1.0).max(0.0) as usize));
                 self.damage_band(HINT_RECT);
             }
-            Action::Rolling(crate::views::rolling::Act::Wave) => self.rolling_press(),
-            Action::Rolling(crate::views::rolling::Act::Collapse) => self.rolling_collapse(),
+            Action::Scrolling(crate::views::scrolling::Act::Wave) => self.scrolling_press(),
+            Action::Scrolling(crate::views::scrolling::Act::Collapse) => self.scrolling_collapse(),
             Action::Minimize => self.want_minimize = true,
             Action::Maximize => self.want_maximize = true,
             Action::Close => self.want_close = true,
@@ -10127,32 +10127,32 @@ pub(crate) fn preview_project(path: &str) -> Project {
     p
 }
 
-/// The rolling sampler's interactions (issue #82): the strip's selection, its zoom and pan, the drag out to the
-/// playlist, and the settings' side of the tape (`crate::rolling`).
+/// The scrolling sampler's interactions (issue #82): the strip's selection, its zoom and pan, the drag out to the
+/// playlist, and the settings' side of the tape (`crate::scrolling`).
 impl App {
-    /// Repaints just the rolling sampler's strip.
+    /// Repaints just the scrolling sampler's strip.
     pub(crate) fn damage_strip(&mut self) {
-        let r = crate::views::rolling::rect(&self.state, self.state.screen.0);
+        let r = crate::views::scrolling::rect(&self.state, self.state.screen.0);
         if r.h > 0.0 {
             self.damage_rect(r);
         }
     }
 
-    /// Points the tape at the settings (Audio ▸ Rolling sampler) and moves the windows with the strip's height
+    /// Points the tape at the settings (Audio ▸ Scrolling sampler) and moves the windows with the strip's height
     /// change (`work_y` carries the strip; spec: ui/ui-scaling.md §1's lift).
-    pub(crate) fn rolling_sync(&mut self) {
-        let on = crate::prefs::check(&crate::prefs::ROLLING_SAMPLER);
-        let before = crate::views::rolling::strip_h(&self.state);
-        self.transport.rolling().sync(on, crate::prefs::rolling_secs());
+    pub(crate) fn scrolling_sync(&mut self) {
+        let on = crate::prefs::check(&crate::prefs::SCROLLING_SAMPLER);
+        let before = crate::views::scrolling::strip_h(&self.state);
+        self.transport.scrolling().sync(on, crate::prefs::scrolling_secs());
         if !on {
-            self.state.roll = Default::default();
+            self.state.scroll = Default::default();
         }
-        let dy = crate::views::rolling::strip_h(&self.state) - before;
+        let dy = crate::views::scrolling::strip_h(&self.state) - before;
         if dy != 0.0 {
             lift_windows(&mut self.state, dy);
         }
         if on {
-            crate::views::rolling::pull(self);
+            crate::views::scrolling::pull(self);
         }
         self.invalidate();
     }
@@ -10160,49 +10160,49 @@ impl App {
     /// A press on the strip's wave: Ctrl+click pauses or resumes the capture; on a selection it begins the drag out
     /// to the playlist (the selection rendered); off it, a new selection starts being drawn, the scroll standing
     /// still while it is.
-    fn rolling_press(&mut self) {
+    fn scrolling_press(&mut self) {
         let (x, y) = self.mouse;
-        let Some(wv) = self.state.roll.wave else { return };
+        let Some(wv) = self.state.scroll.wave else { return };
         if !wv.contains(x, y) {
             return;
         }
         if self.ctrl {
-            let paused = !self.transport.rolling().paused();
-            self.transport.rolling().set_paused(paused);
-            self.state.roll.paused = paused;
-            self.state.message = Some(if paused { "Rolling sampler paused: the tape stands still".into() } else { "Rolling sampler resumed".into() });
-            crate::views::rolling::pull(self);
+            let paused = !self.transport.scrolling().paused();
+            self.transport.scrolling().set_paused(paused);
+            self.state.scroll.paused = paused;
+            self.state.message = Some(if paused { "Scrolling sampler paused: the tape stands still".into() } else { "Scrolling sampler resumed".into() });
+            crate::views::scrolling::pull(self);
             self.damage_strip();
             return;
         }
-        let f = crate::views::rolling::frame_at(&self.state, x);
-        if let Some((a, b)) = self.state.roll.sel {
+        let f = crate::views::scrolling::frame_at(&self.state, x);
+        if let Some((a, b)) = self.state.scroll.sel {
             if f >= a && f <= b && b.saturating_sub(a) > 64 {
-                return self.rolling_drag_out();
+                return self.scrolling_drag_out();
             }
         }
-        self.state.roll.hold = Some(self.state.roll.from);
-        self.state.roll.sel = Some((f, f));
-        self.drag = Some(Drag::RollSel);
+        self.state.scroll.hold = Some(self.state.scroll.from);
+        self.state.scroll.sel = Some((f, f));
+        self.drag = Some(Drag::ScrollSel);
         self.damage_strip();
     }
 
     /// The selection's far end follows the mouse while it is drawn.
-    fn rolling_select_move(&mut self) {
+    fn scrolling_select_move(&mut self) {
         let (x, _) = self.mouse;
-        let f = crate::views::rolling::frame_at(&self.state, x);
-        if let Some((a, _)) = self.state.roll.sel {
-            self.state.roll.sel = Some((a.min(f), a.max(f)));
+        let f = crate::views::scrolling::frame_at(&self.state, x);
+        if let Some((a, _)) = self.state.scroll.sel {
+            self.state.scroll.sel = Some((a.min(f), a.max(f)));
         }
         self.damage_strip();
     }
 
     /// The selection drawn: the scroll follows the live edge again; a click (a sliver of a selection) clears it.
-    fn rolling_select_end(&mut self) {
-        self.state.roll.hold = None;
-        if let Some((a, b)) = self.state.roll.sel {
+    fn scrolling_select_end(&mut self) {
+        self.state.scroll.hold = None;
+        if let Some((a, b)) = self.state.scroll.sel {
             if b.saturating_sub(a) < 3 {
-                self.state.roll.sel = None;
+                self.state.scroll.sel = None;
             }
         }
         self.damage_strip();
@@ -10210,8 +10210,8 @@ impl App {
 
     /// The selection becomes an audio clip: rendered into the Recorded folder, then carried as a browser sample
     /// drag, which the playlist already knows how to drop (`browser_drop`, `Item::Sample`).
-    fn rolling_drag_out(&mut self) {
-        let Some((a, b)) = self.state.roll.sel else { return };
+    fn scrolling_drag_out(&mut self) {
+        let Some((a, b)) = self.state.scroll.sel else { return };
         let dir = crate::data_folder::folder(&self.state)
             .or_else(crate::app::theme_dir)
             .unwrap_or_else(std::env::temp_dir)
@@ -10219,18 +10219,18 @@ impl App {
         let _ = std::fs::create_dir_all(&dir);
         let name = format!("{}_ROLL.wav", chrono::Local::now().format("%Y-%m-%d %H-%M-%S"));
         let path = dir.join(&name);
-        // The settings' side of the drag-out (Audio ▸ Rolling sampler): the silence at either end cut, the edges
+        // The settings' side of the drag-out (Audio ▸ Scrolling sampler): the silence at either end cut, the edges
         // faded in and out over the knob's milliseconds.
-        let trim = crate::prefs::check(&crate::prefs::ROLLING_TRIM);
-        let fade = crate::prefs::slider(&crate::prefs::ROLLING_FADE) as f32;
-        match self.transport.rolling().render_clip(a, b.saturating_sub(a) + 1, &path, trim, fade) {
+        let trim = crate::prefs::check(&crate::prefs::SCROLLING_TRIM);
+        let fade = crate::prefs::slider(&crate::prefs::SCROLLING_FADE) as f32;
+        match self.transport.scrolling().render_clip(a, b.saturating_sub(a) + 1, &path, trim, fade) {
             Ok(n) if n > 0 => {
                 let item = crate::views::browser::Item::Sample(path.to_string_lossy().to_string());
                 self.drag = Some(Drag::Browser { item, label: name.clone(), m0: self.mouse, started: false });
                 self.state.message = Some(format!("Recording {name}: drop it on a playlist track"));
             }
             Ok(_) => {
-                self.state.roll.sel = None;
+                self.state.scroll.sel = None;
                 self.state.message = Some("The selection is not on the tape any more".into());
             }
             Err(e) => self.state.message = Some(format!("Could not render the selection: {e}")),
@@ -10238,10 +10238,10 @@ impl App {
         self.invalidate();
     }
 
-    /// The wave colour's menu (Audio ▸ Rolling sampler's Wave colour combo): the theme's, or the colour picker.
+    /// The wave colour's menu (Audio ▸ Scrolling sampler's Wave colour combo): the theme's, or the colour picker.
     pub(crate) fn wave_colour_menu(&mut self, x: f32, y: f32) {
         use crate::playlist::{Cmd, Mark, PItem, Popup};
-        let now = crate::prefs::rolling_wave_color();
+        let now = crate::prefs::scrolling_wave_color();
         let items = vec![
             PItem::new("Theme", Cmd::WaveColour(0)).mark(Mark::Radio(now.is_none())),
             PItem::new("Pick a colour...", Cmd::WaveColour(1)),
@@ -10253,7 +10253,7 @@ impl App {
     /// The wave colour's menu chose: 0 back to the theme's, 1 opens the colour picker where the combo stands.
     pub(crate) fn wave_colour_choose(&mut self, i: usize) {
         if i == 0 {
-            crate::prefs::set_rolling_wave_color(None);
+            crate::prefs::set_scrolling_wave_color(None);
             self.state.settings.wave_picker = None;
             self.state.message = Some("Wave colour: the theme's".into());
             self.invalidate();
@@ -10273,7 +10273,7 @@ impl App {
 
     /// Opens the wave colour's picker at `at` (the swatch's centre and radius): it starts at the colour now.
     pub(crate) fn wave_picker_open(&mut self, at: (f32, f32, f32)) {
-        let before = crate::prefs::rolling_wave_color();
+        let before = crate::prefs::scrolling_wave_color();
         let hsv = crate::theme_adjust::hsv(os_ui::Color::rgb(before.unwrap_or(0xb9bfc3)));
         self.state.settings.wave_picker = Some(views::settings::WavePicker { hsv, before, at });
         self.state.message = Some("Wave colour: pick one".into());
@@ -10285,7 +10285,7 @@ impl App {
         let Some(p) = self.state.settings.wave_picker.clone() else { return };
         let c = crate::theme_adjust::from_hsv(p.hsv);
         let rgb = u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b);
-        crate::prefs::set_rolling_wave_color(Some(rgb));
+        crate::prefs::set_scrolling_wave_color(Some(rgb));
         self.hint = Cow::Owned(format!("Wave colour #{rgb:06x}"));
         self.invalidate();
     }
@@ -10317,43 +10317,43 @@ impl App {
     }
 
     /// The collapse arrow: the strip folds to a row, the windows move with `work_y`.
-    fn rolling_collapse(&mut self) {
-        let before = crate::views::rolling::strip_h(&self.state);
-        self.state.roll.collapsed = !self.state.roll.collapsed;
-        let dy = crate::views::rolling::strip_h(&self.state) - before;
+    fn scrolling_collapse(&mut self) {
+        let before = crate::views::scrolling::strip_h(&self.state);
+        self.state.scroll.collapsed = !self.state.scroll.collapsed;
+        let dy = crate::views::scrolling::strip_h(&self.state) - before;
         lift_windows(&mut self.state, dy);
-        self.state.roll.wave = None;
-        if !self.state.roll.collapsed {
+        self.state.scroll.wave = None;
+        if !self.state.scroll.collapsed {
             // Rebuild the view immediately from the retained tape; no new transport block is needed after expanding.
-            crate::views::rolling::pull(self);
+            crate::views::scrolling::pull(self);
         }
         self.invalidate();
     }
 
     /// The wheel over the strip: Shift+wheel zooms the view on the selection's end (else the live edge), the plain
     /// wheel scrolls back and forth through the tape.
-    fn rolling_wheel(&mut self, notch: f32, shift: bool) {
+    fn scrolling_wheel(&mut self, notch: f32, shift: bool) {
         if notch == 0.0 {
             return;
         }
-        let cap = crate::prefs::rolling_secs();
-        let rate = f64::from(self.state.roll.rate.max(1));
+        let cap = crate::prefs::scrolling_secs();
+        let rate = f64::from(self.state.scroll.rate.max(1));
         if shift {
-            let anchor = self.state.roll.sel.map_or(self.state.roll.heard, |(_, b)| b);
-            let z0 = crate::views::rolling::shown(&self.state);
-            let z1 = (z0 / 1.5f32.powf(notch)).clamp(crate::views::rolling::MIN_ZOOM, cap);
+            let anchor = self.state.scroll.sel.map_or(self.state.scroll.heard, |(_, b)| b);
+            let z0 = crate::views::scrolling::shown(&self.state);
+            let z1 = (z0 / 1.5f32.powf(notch)).clamp(crate::views::scrolling::MIN_ZOOM, cap);
             // Back out to the whole tape: zoom 0 and the pan with it.
             let whole = z1 >= cap - 0.01;
-            self.state.roll.zoom = if whole { 0.0 } else { z1 };
-            self.state.roll.pan = if whole { 0 } else { self.state.roll.heard.saturating_sub(anchor) };
+            self.state.scroll.zoom = if whole { 0.0 } else { z1 };
+            self.state.scroll.pan = if whole { 0 } else { self.state.scroll.heard.saturating_sub(anchor) };
         } else {
-            let visible = (crate::views::rolling::shown(&self.state) as f64 * rate) as u64;
-            let tape = self.state.roll.heard.max(visible);
+            let visible = (crate::views::scrolling::shown(&self.state) as f64 * rate) as u64;
+            let tape = self.state.scroll.heard.max(visible);
             let max = tape.saturating_sub(visible);
-            let next = self.state.roll.pan as f64 + (f64::from(notch) * visible as f64 / 6.0);
-            self.state.roll.pan = (next.max(0.0) as u64).min(max);
+            let next = self.state.scroll.pan as f64 + (f64::from(notch) * visible as f64 / 6.0);
+            self.state.scroll.pan = (next.max(0.0) as u64).min(max);
         }
-        crate::views::rolling::pull(self);
+        crate::views::scrolling::pull(self);
         self.damage_strip();
     }
 }

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The rolling sampler (issue #82): a background ring of the master's newest output, a strip of it between the
+//! The scrolling sampler (issue #82): a background ring of the master's newest output, a strip of it between the
 //! toolbar and the playlist, a selection on the strip that drops onto the playlist as a rendered audio clip.
 //!
-//! The audio side ([`Rolling`]) lives in the transport's `Shared`, pushed from the renderers' post-master copy (the
-//! same place the monitor's tap is fed, `transport.rs`): no mixer insert, previews excluded. It is a rolling tape of
-//! the last `cap` frames (30 s to 10 min, Audio ▸ Rolling sampler), RAM only, session lifespan: it never enters a
+//! The audio side ([`Scrolling`]) lives in the transport's `Shared`, pushed from the renderers' post-master copy (the
+//! same place the monitor's tap is fed, `transport.rs`): no mixer insert, previews excluded. It is a scrolling tape of
+//! the last `cap` frames (30 s to 10 min, Audio ▸ Scrolling sampler), RAM only, session lifespan: it never enters a
 //! project file, and a project change clears it.
 //!
 //! The strip's view state ([`Strip`]) lives in the app state: a zoom, a pan back from the live edge and a selection
@@ -26,7 +26,7 @@ const SPOOL: usize = 128;
 
 /// The audio side: a ring of the newest output frames (L, R) with its per-`PYR` peaks, and when the device took the
 /// last block of them. Zero-capacity until enabled: off, a push is one relaxed atomic load.
-pub struct Rolling {
+pub struct Scrolling {
     on: AtomicBool,
     paused: AtomicBool,
     /// The frames pushed while the data lock was busy (the UI's scan or render had it): written into the tape by the
@@ -67,9 +67,9 @@ struct Data {
     rate: u32,
 }
 
-impl Default for Rolling {
+impl Default for Scrolling {
     fn default() -> Self {
-        Rolling {
+        Scrolling {
             on: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             pending: Mutex::new(Vec::new()),
@@ -99,7 +99,7 @@ impl Data {
     }
 }
 
-impl Rolling {
+impl Scrolling {
     /// Turns the tap on or off, and points it at `secs` seconds of tape. Off, nothing is kept (and the memory is
     /// let go); on, the next push fills the ring at the device's rate.
     pub fn sync(&self, on: bool, secs: f32) {
@@ -254,7 +254,7 @@ impl Rolling {
     /// only for the copy; the file is written after, so a long render never holds the audio side up.
     pub fn render_clip(&self, from: u64, len: u64, wav: &std::path::Path, trim: bool, fade_ms: f32) -> std::io::Result<u64> {
         let (data, rate) = {
-            let d = self.data.lock().map_err(|_| std::io::Error::other("the rolling buffer is busy"))?;
+            let d = self.data.lock().map_err(|_| std::io::Error::other("the scrolling buffer is busy"))?;
             let cap = d.l.len() as u64;
             if cap == 0 || len == 0 {
                 return Ok(0);
@@ -428,7 +428,7 @@ fn bytemuck_bytes(v: &[f32]) -> &[u8] {
 
 /// The strip's view state: the zoom (seconds shown), the pan back from the live edge, the selection in absolute
 /// frames, and the drag-time hold that stops the scroll following the live edge while a selection is drawn. The
-/// picture (`App`'s pull, `crate::views::rolling::pull`) fills the rest in: the view's frames, the last heard frame
+/// picture (`App`'s pull, `crate::views::scrolling::pull`) fills the rest in: the view's frames, the last heard frame
 /// and rate, the wave's rect and its per-column peaks.
 #[derive(Default, Clone, Debug)]
 pub struct Strip {
@@ -464,13 +464,13 @@ mod tests {
 
     const RATE: u32 = 1000; // a small rate keeps the tests' rings small
 
-    fn tape(secs: f32) -> Rolling {
-        let r = Rolling::default();
+    fn tape(secs: f32) -> Scrolling {
+        let r = Scrolling::default();
         r.sync(true, secs);
         r
     }
 
-    fn block(r: &Rolling, frames: u32, at: f32, block: u64, rate: u32) {
+    fn block(r: &Scrolling, frames: u32, at: f32, block: u64, rate: u32) {
         let stereo: Vec<f32> = (0..frames).flat_map(|i| [at + i as f32, -(at + i as f32)]).collect();
         // The device took the block long enough ago that it has played all of it, so `heard` covers it.
         let taken = Instant::now() - std::time::Duration::from_secs(2);
@@ -518,7 +518,7 @@ mod tests {
     fn a_selection_renders_as_a_wav() {
         let r = tape(1.0);
         block(&r, 100, 2.0, 1, RATE);
-        let wav = std::env::temp_dir().join(format!("rolling_test_{}.wav", std::process::id()));
+        let wav = std::env::temp_dir().join(format!("scrolling_test_{}.wav", std::process::id()));
         let n = r.render(10, 50, &wav).expect("render");
         assert_eq!(n, 50);
         let bytes = std::fs::read(&wav).expect("read");
@@ -530,7 +530,7 @@ mod tests {
     /// Off, the tape keeps nothing and lets its memory go.
     #[test]
     fn off_the_tape_keeps_nothing() {
-        let r = Rolling::default();
+        let r = Scrolling::default();
         r.sync(true, 1.0);
         block(&r, 100, 1.0, 1, RATE);
         r.sync(false, 1.0);
@@ -564,13 +564,13 @@ mod tests {
     #[test]
     fn the_tape_round_trip_keeps_the_rate_and_the_frames() {
         const RATE: u32 = 48000;
-        let r = Rolling::default();
+        let r = Scrolling::default();
         r.sync(true, 10.0);
         let wave = sine(RATE as usize, 1000.0, RATE);
         for (b, chunk) in wave.chunks(480 * 2).enumerate() {
             r.push(chunk, 2, b as u64 + 1, Instant::now() - std::time::Duration::from_secs(2), RATE);
         }
-        let wav = std::env::temp_dir().join(format!("rolling_loop_{}.wav", std::process::id()));
+        let wav = std::env::temp_dir().join(format!("scrolling_loop_{}.wav", std::process::id()));
         let n = r.render(12000, 24000, &wav).expect("render");
         assert_eq!(n, 24000, "the selection's frames, all of them");
         let s = os_engine::sample::load(&wav).expect("the drag-out loads as a sample");
@@ -586,13 +586,13 @@ mod tests {
     #[test]
     fn a_dragged_clip_plays_at_its_captured_speed() {
         const RATE: u32 = 48000;
-        let r = Rolling::default();
+        let r = Scrolling::default();
         r.sync(true, 10.0);
         let wave = sine(RATE as usize, 1000.0, RATE);
         for (b, chunk) in wave.chunks(480 * 2).enumerate() {
             r.push(chunk, 2, b as u64 + 1, Instant::now() - std::time::Duration::from_secs(2), RATE);
         }
-        let wav = std::env::temp_dir().join(format!("rolling_clip_{}.wav", std::process::id()));
+        let wav = std::env::temp_dir().join(format!("scrolling_clip_{}.wav", std::process::id()));
         r.render(0, 24000, &wav).expect("render");
 
         // The channel `add_audio_clip` makes (playlist.rs): an audio clip of the file, no stretch, no pitch.
@@ -684,7 +684,7 @@ mod tests {
     fn a_clip_render_trims_and_fades() {
         const RATE: u32 = 8000;
         // A second of tape at its own rate: half silence, half a full-scale sine (a push sets the tape's rate).
-        let r = Rolling::default();
+        let r = Scrolling::default();
         r.sync(true, 1.0);
         let mut stereo = vec![0.0f32; 8000 * 2];
         for (i, f) in stereo[4000 * 2..].chunks_exact_mut(2).enumerate() {
@@ -692,7 +692,7 @@ mod tests {
             (f[0], f[1]) = (v, v);
         }
         r.push(&stereo, 2, 1, Instant::now() - std::time::Duration::from_secs(2), RATE);
-        let wav = std::env::temp_dir().join(format!("rolling_trim_{}.wav", std::process::id()));
+        let wav = std::env::temp_dir().join(format!("scrolling_trim_{}.wav", std::process::id()));
         let n = r.render_clip(0, 8000, &wav, true, 2.0).expect("render");
         assert_eq!(n, 4000, "the leading half second of silence is gone, the sine's frames stay");
         let s = os_engine::sample::load(&wav).expect("loads");

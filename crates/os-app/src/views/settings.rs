@@ -50,9 +50,9 @@ pub enum SAct {
     PickSv,
     PickHue,
     PickRevert,
-    /// The rolling sampler's wave colour: its combo's bottom left (where its menu opens).
+    /// The scrolling sampler's wave colour: its combo's bottom left (where its menu opens).
     WaveColourMenu(f32, f32),
-    /// The wave colour's picker (like the theme's, for `crate::prefs::set_rolling_wave_color`): its panel (swallows
+    /// The wave colour's picker (like the theme's, for `crate::prefs::set_scrolling_wave_color`): its panel (swallows
     /// clicks), close button, saturation / brightness square, hue strip, and Use theme.
     WavePickBody,
     WavePickClose,
@@ -87,8 +87,8 @@ pub enum SAct {
     FolderCell(usize, crate::search_folders::Col),
 }
 
-/// The wave colour picker's state while it is open (Audio ▸ Rolling sampler's Wave colour): like the theme's
-/// colour picker, for `crate::prefs::set_rolling_wave_color`.
+/// The wave colour picker's state while it is open (Audio ▸ Scrolling sampler's Wave colour): like the theme's
+/// colour picker, for `crate::prefs::set_scrolling_wave_color`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WavePicker {
     /// The colour being picked, kept as HSV so hue and saturation survive black and greys.
@@ -99,7 +99,7 @@ pub struct WavePicker {
     pub at: (f32, f32, f32),
 }
 
-/// The rolling sampler's wave colour row's label (`crate::prefs::rolling_wave_color`).
+/// The scrolling sampler's wave colour row's label (`crate::prefs::scrolling_wave_color`).
 pub const WAVE_COLOUR: &str = "Wave colour";
 
 /// The Info page's text boxes: the project's credits (spec: ui/settings.md "Info", flp/events/project-info.md).
@@ -217,7 +217,7 @@ pub struct SettingsUi {
     pub theme_previews: Vec<os_theme::Palette>,
     /// Theme ▸ Adjustments' colour picker, while open.
     pub picker: Option<crate::theme_adjust::Picker>,
-    /// The rolling sampler's wave colour picker (Audio page), while open.
+    /// The scrolling sampler's wave colour picker (Audio page), while open.
     pub wave_picker: Option<WavePicker>,
     /// The Themes tiles from here on are the user's own (`crate::theme_library::user_dir`).
     pub user_from: usize,
@@ -584,7 +584,7 @@ fn combo(v: &str, w: f32, label: &'static str) -> Row {
 
 /// The wave colour row's box text: the custom colour's hex, or Theme when there is none.
 fn wave_colour_text() -> String {
-    crate::prefs::rolling_wave_color().map_or("Theme".into(), |c| format!("#{c:06x}"))
+    crate::prefs::scrolling_wave_color().map_or("Theme".into(), |c| format!("#{c:06x}"))
 }
 /// The panning law's name for event 23 (`PANNING_LAWS`; none is Circular); a value outside those shows as a number.
 pub fn panning_text(law: Option<u8>) -> String {
@@ -723,12 +723,12 @@ pub fn page(tab: usize, s: &State) -> Vec<Group> {
                     Check("Play truncated notes on transport", true),
                     Check("Reset plugins on transport", false),
                 ]),
-                g("Rolling sampler", vec![
-                    Check("Rolling sampler", crate::prefs::check(&crate::prefs::ROLLING_SAMPLER)),
-                    combo(crate::prefs::choice(&crate::prefs::ROLLING_BUFFER), 96.0, "Rolling buffer"),
-                    Check("Remove silence", crate::prefs::check(&crate::prefs::ROLLING_TRIM)),
+                g("Scrolling sampler", vec![
+                    Check("Scrolling sampler", crate::prefs::check(&crate::prefs::SCROLLING_SAMPLER)),
+                    combo(crate::prefs::choice(&crate::prefs::SCROLLING_BUFFER), 96.0, "Scrolling buffer"),
+                    Check("Remove silence", crate::prefs::check(&crate::prefs::SCROLLING_TRIM)),
                     Slider("Fade in/out", 0.5),
-                    combo(crate::prefs::choice(&crate::prefs::ROLLING_WAVE_MODE), 112.0, crate::prefs::ROLLING_WAVE_MODE.label),
+                    combo(crate::prefs::choice(&crate::prefs::SCROLLING_WAVE_MODE), 112.0, crate::prefs::SCROLLING_WAVE_MODE.label),
                     combo(&wave_colour_text(), 96.0, WAVE_COLOUR),
                     Text("Keeps the newest master output in memory; a selection on the strip between the toolbar and the playlist drops onto a track as audio. Ctrl+click the strip's wave to pause the capture; the fade smooths a dragged clip's edges over that many milliseconds, from the nearest zero crossing.".into(), true),
                 ]),
@@ -1335,7 +1335,7 @@ fn picker(ui: &mut Ui, s: &State, p: &crate::theme_adjust::Picker, win: Rect) {
     ui.c.text_center(Font::new(13), b, if hov { t.glyph } else { t.text }, "Revert");
 }
 
-/// Audio ▸ Rolling sampler's wave colour picker.
+/// Audio ▸ Scrolling sampler's wave colour picker.
 fn wave_picker(ui: &mut Ui, s: &State, p: &WavePicker, win: Rect) {
     use crate::theme_adjust::{self as adj, from_hsv};
     let t = ui.t;
@@ -1578,15 +1578,15 @@ fn paint_row_at(ui: &mut Ui, s: &State, group: &'static str, row: &Row, g: Rect,
         }
         // The Audio page's device, rate and buffer combos and General's Animations open their menus.
         // An ASIO driver has no Windows mode: the Mode combo shows the one kept, greyed, and its hint says why.
-        // The rolling sampler's wave colour: its menu opens under the box; a dot of the colour it is now by the
+        // The scrolling sampler's wave colour: its menu opens under the box; a dot of the colour it is now by the
         // label (the theme's ink when it follows the theme).
         Row::Combo(v, w, label) if *label == WAVE_COLOUR => {
             let b = Rect::new(x0, y + 3.0, *w, 21.0);
-            let hov = ui.hit(b, Action::Settings(SAct::WaveColourMenu(b.x, b.bottom())), "The rolling sampler strip's wave colour: the theme's, or pick one");
+            let hov = ui.hit(b, Action::Settings(SAct::WaveColourMenu(b.x, b.bottom())), "The scrolling sampler strip's wave colour: the theme's, or pick one");
             kit::combo(ui.c, t, b, v, f, kit::State::hover(hov));
             ui.c.text(f, b.right() + 8.0, ty, t.text, label);
             let dot = Rect::new(b.right() + 8.0 + ui.c.text_width(f, label) + 8.0, ty + 3.0, 12.0, 12.0);
-            let colour = crate::prefs::rolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), |c| os_ui::Color::rgb(c));
+            let colour = crate::prefs::scrolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), |c| os_ui::Color::rgb(c));
             ui.c.fill_rrect(dot, 6.0, colour);
             ui.c.stroke_rrect(dot, 6.0, 1.0, t.s(0x161819));
         }
@@ -1684,7 +1684,7 @@ fn paint_row_at(ui: &mut Ui, s: &State, group: &'static str, row: &Row, g: Rect,
             let hov = ui.hit(Rect::span(tr.x - 9.0, tr.right() + 9.0, cy - 9.0, cy + 9.0), Action::Settings(SAct::Slider(label, tr.x, tr.w)), "");
             slider_track(ui, tr, cy, v);
             let mut tx = tr.right() + 12.0;
-            // The value, in its unit (the rolling sampler's fade: "3 ms"), before the label.
+            // The value, in its unit (the scrolling sampler's fade: "3 ms"), before the label.
             if !sl.unit.is_empty() {
                 let text = format!("{} {}", crate::prefs::slider(sl), sl.unit);
                 let vw = ui.c.text_width(f, &text);
