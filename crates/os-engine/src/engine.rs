@@ -4065,21 +4065,22 @@ struct LofiProfile {
     mono: bool,
     filter: bool,
     adaptive: bool,
+    mfx: bool,
     depth: f32,
 }
 
 fn lofi_profile(model: u8) -> Option<LofiProfile> {
     match model {
-        0 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: false, adaptive: false, depth: 1.0 }),
-        1 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: false, adaptive: false, depth: 0.85 }),
-        2 => Some(LofiProfile { clock: 7812.5, bits: 8, mono: false, filter: false, adaptive: true, depth: 1.0 }),
-        3 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: true, adaptive: false, depth: 1.0 }),
-        4 => Some(LofiProfile { clock: 44100.0, bits: 16, mono: false, filter: true, adaptive: false, depth: 0.25 }),
-        5 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: true, adaptive: false, depth: 0.65 }),
-        6 => Some(LofiProfile { clock: 11025.0, bits: 8, mono: false, filter: false, adaptive: false, depth: 1.0 }),
-        7 => Some(LofiProfile { clock: 31250.0, bits: 16, mono: false, filter: true, adaptive: true, depth: 0.45 }),
-        8 => Some(LofiProfile { clock: 15625.0, bits: 12, mono: false, filter: false, adaptive: true, depth: 0.75 }),
-        9 => Some(LofiProfile { clock: 7812.5, bits: 4, mono: false, filter: false, adaptive: true, depth: 1.0 }),
+        0 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: false, adaptive: false, mfx: false, depth: 1.0 }),
+        1 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: false, adaptive: false, mfx: true, depth: 0.5 }),
+        2 => Some(LofiProfile { clock: 7812.5, bits: 8, mono: false, filter: false, adaptive: true, mfx: false, depth: 1.0 }),
+        3 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: true, adaptive: false, mfx: false, depth: 1.0 }),
+        4 => Some(LofiProfile { clock: 44100.0, bits: 16, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.0 }),
+        5 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.5 }),
+        6 => Some(LofiProfile { clock: 11025.0, bits: 8, mono: false, filter: false, adaptive: false, mfx: true, depth: 1.0 }),
+        7 => Some(LofiProfile { clock: 31250.0, bits: 16, mono: false, filter: true, adaptive: true, mfx: false, depth: 0.45 }),
+        8 => Some(LofiProfile { clock: 15625.0, bits: 12, mono: false, filter: false, adaptive: true, mfx: false, depth: 0.75 }),
+        9 => Some(LofiProfile { clock: 7812.5, bits: 4, mono: false, filter: false, adaptive: true, mfx: false, depth: 1.0 }),
         _ => None,
     }
 }
@@ -4107,7 +4108,12 @@ fn lofi_quantized(profile: LofiProfile, mut l: f32, mut r: f32, previous: (f32, 
             lofi_adaptive(r, previous.1, profile.depth),
         )
     } else {
-        (lofi_quantize(l, profile.bits), lofi_quantize(r, profile.bits))
+        let bits = if profile.mfx {
+            (16.0 - 8.0 * profile.depth).round().clamp(8.0, 16.0) as u8
+        } else {
+            profile.bits
+        };
+        (lofi_quantize(l, bits), lofi_quantize(r, bits))
     }
 }
 
@@ -5411,7 +5417,7 @@ mod tests {
         let sp = lofi_profile(0).expect("SP-1200 profile");
         assert_eq!((sp.clock, sp.bits, sp.mono, sp.filter), (26040.0, 12, true, false));
         let p6 = lofi_profile(4).expect("P-6 profile");
-        assert_eq!((p6.clock, p6.bits, p6.mono, p6.filter), (44100.0, 16, false, true));
+        assert_eq!((p6.clock, p6.bits, p6.mono, p6.filter, p6.mfx, p6.depth), (44100.0, 16, false, true, true, 0.0));
         let sp202 = lofi_profile(9).expect("SP-202 adaptive profile");
         assert_eq!((sp202.clock, sp202.bits, sp202.adaptive), (7812.5, 4, true));
         assert!(lofi_profile(10).is_none());
@@ -5421,6 +5427,22 @@ mod tests {
             let profile = lofi_profile(model).unwrap();
             let out = lofi_quantized(profile, 0.73123, -0.41789, (0.0, 0.0));
             assert!(out != (0.73123, -0.41789), "mode {model} did not process audio");
+        }
+    }
+
+    #[test]
+    fn lofi_clip_render_differs_from_bypass_for_every_mode() {
+        let mut baseline = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        let dry = render_song(&baseline);
+        assert!(dry.iter().any(|sample| sample.abs() > 1.0e-4));
+        for model in 0..10 {
+            baseline.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+            let wet = render_song(&baseline);
+            assert_eq!(wet.len(), dry.len(), "mode {model} changed clip duration");
+            assert!(
+                wet.iter().zip(&dry).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "mode {model} did not alter rendered audio"
+            );
         }
     }
 
@@ -6228,6 +6250,11 @@ mod tests {
     fn render(p: &Project) -> Vec<f32> {
         let mut lib = SampleLibrary::new(None);
         Engine::new(p, &mut lib, 44100, PlayMode::Pattern(1)).render_all(512)
+    }
+
+    fn render_song(p: &Project) -> Vec<f32> {
+        let mut lib = SampleLibrary::new(None);
+        Engine::new(p, &mut lib, 44100, PlayMode::Song).render_all(512)
     }
 
     fn peak(x: &[f32], ch: usize) -> f32 {
