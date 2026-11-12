@@ -3058,16 +3058,30 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
                 PItem::sep(),
                 PItem::sub(
                     "Lo-Fi",
-                    [("Off", 3), ("SP-1200", 0), ("P-6", 1), ("SP-202", 2)]
-                        .into_iter()
-                        .map(|(label, model)| {
-                            PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(match (model, c.effect()) {
-                                (3, os_model::ClipEffect::None) => true,
-                                (m, os_model::ClipEffect::Lofi(current)) => m == current,
-                                _ => false,
-                            }))
-                        })
-                        .collect(),
+                    vec![
+                        PItem::new("Off", Cmd::ClipLofi(i, 10)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::None)),
+                        PItem::sub(
+                            "SP-1200",
+                            [("12-bit ZOH", 0), ("12-bit filtered", 3)]
+                                .into_iter()
+                                .map(|(label, model)| PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(model))))
+                                .collect(),
+                        ),
+                        PItem::sub(
+                            "P-6",
+                            [("44.1 kHz stereo", 4), ("22.05 kHz stereo", 1), ("11.025 kHz lo-fi", 6)]
+                                .into_iter()
+                                .map(|(label, model)| PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(model))))
+                                .collect(),
+                        ),
+                        PItem::sub(
+                            "SP-202",
+                            [("31.25 kHz filtered", 7), ("15.625 kHz raw", 8), ("7.8125 kHz adaptive", 9)]
+                                .into_iter()
+                                .map(|(label, model)| PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(model))))
+                                .collect(),
+                        ),
+                    ],
                 ),
                 PItem::sep(),
                 PItem::sub(
@@ -5314,7 +5328,7 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
         Cmd::ClipUniqueSample(i) => Some(make_unique_sample(s, i)),
         Cmd::ClipBounce(i) => Some(bounce_in_place(s, i)),
         Cmd::ClipLofi(i, model) => {
-            let effect = if model == 3 { os_model::ClipEffect::None } else { os_model::ClipEffect::lofi(model).unwrap_or(os_model::ClipEffect::None) };
+            let effect = if model == 10 { os_model::ClipEffect::None } else { os_model::ClipEffect::lofi(model).unwrap_or(os_model::ClipEffect::None) };
             if !matches!(clips(s).get(i).map(|c| (c.source, c.effect())), Some((ClipSource::Channel(ch), old)) if source_kind(s, ClipSource::Channel(ch)) == PickKind::Audio && old != effect) {
                 return None;
             }

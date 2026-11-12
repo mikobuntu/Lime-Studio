@@ -721,6 +721,8 @@ struct Voice {
     lofi: Option<u8>,
     lofi_phase: f64,
     lofi_hold: (f32, f32),
+    lofi_filter: (f32, f32),
+    lofi_previous: (f32, f32),
     /// The channel buffer it plays (`Trigger::buf`).
     buf: u16,
     /// Its note's key, and where slide notes have moved it.
@@ -2225,6 +2227,8 @@ impl Engine {
             lofi: None,
             lofi_phase: 1.0,
             lofi_hold: (0.0, 0.0),
+            lofi_filter: (0.0, 0.0),
+            lofi_previous: (0.0, 0.0),
             buf,
             key,
             slide: VoiceSlide::new(step, velocity, pan),
@@ -3645,6 +3649,8 @@ impl Engine {
             lofi: t.lofi,
             lofi_phase: 1.0,
             lofi_hold: (0.0, 0.0),
+            lofi_filter: (0.0, 0.0),
+            lofi_previous: (0.0, 0.0),
             buf: t.buf,
             key: t.key,
             slide: VoiceSlide::new(t.rate * t.speed, t.velocity, t.pan),
@@ -4052,11 +4058,28 @@ impl Engine {
 /// Resampling window half-width in source samples.
 const SINC_W: f64 = 13.5;
 
-fn lofi_profile(model: u8) -> Option<(f64, u8, bool)> {
+#[derive(Clone, Copy)]
+struct LofiProfile {
+    clock: f64,
+    bits: u8,
+    mono: bool,
+    filter: bool,
+    adaptive: bool,
+    depth: f32,
+}
+
+fn lofi_profile(model: u8) -> Option<LofiProfile> {
     match model {
-        0 => Some((26040.0, 12, true)),
-        1 => Some((22050.0, 12, false)),
-        2 => Some((7812.5, 8, false)),
+        0 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: false, adaptive: false, depth: 1.0 }),
+        1 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: false, adaptive: false, depth: 0.85 }),
+        2 => Some(LofiProfile { clock: 7812.5, bits: 8, mono: false, filter: false, adaptive: true, depth: 1.0 }),
+        3 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: true, adaptive: false, depth: 1.0 }),
+        4 => Some(LofiProfile { clock: 44100.0, bits: 16, mono: false, filter: true, adaptive: false, depth: 0.25 }),
+        5 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: true, adaptive: false, depth: 0.65 }),
+        6 => Some(LofiProfile { clock: 11025.0, bits: 8, mono: false, filter: false, adaptive: false, depth: 1.0 }),
+        7 => Some(LofiProfile { clock: 31250.0, bits: 16, mono: false, filter: true, adaptive: true, depth: 0.45 }),
+        8 => Some(LofiProfile { clock: 15625.0, bits: 12, mono: false, filter: false, adaptive: true, depth: 0.75 }),
+        9 => Some(LofiProfile { clock: 7812.5, bits: 4, mono: false, filter: false, adaptive: true, depth: 1.0 }),
         _ => None,
     }
 }
@@ -4064,6 +4087,13 @@ fn lofi_profile(model: u8) -> Option<(f64, u8, bool)> {
 fn lofi_quantize(value: f32, bits: u8) -> f32 {
     let levels = ((1u32 << bits.min(24)) - 1) as f32;
     (((value.clamp(-1.0, 1.0) * 0.5 + 0.5) * levels).round() / levels * 2.0 - 1.0).clamp(-1.0, 1.0)
+}
+
+fn lofi_adaptive(value: f32, previous: f32, depth: f32) -> f32 {
+    let delta = (value - previous) * depth;
+    let exponent = delta.abs().max(1.0e-6).log2().floor();
+    let step = 2.0f32.powf(exponent - 3.0).max(1.0e-6);
+    previous + (delta / step).round().clamp(-8.0, 7.0) * step
 }
 
 /// Adds one voice into its channel's insert bus for block frames `offset..end`.
@@ -4173,15 +4203,31 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
             (l as f32, r as f32)
         };
         if let Some(model) = v.lofi {
-            if let Some((clock, bits, mono)) = lofi_profile(model) {
-                v.lofi_phase += clock * ch.frame_s;
+            if let Some(profile) = lofi_profile(model) {
+                v.lofi_phase += profile.clock * ch.frame_s;
                 if v.lofi_phase >= 1.0 {
                     v.lofi_phase -= v.lofi_phase.floor();
-                    if mono {
+                    if profile.filter {
+                        let alpha = (profile.clock * ch.frame_s).clamp(0.05, 0.95) as f32;
+                        v.lofi_filter.0 += alpha * (l - v.lofi_filter.0);
+                        v.lofi_filter.1 += alpha * (r - v.lofi_filter.1);
+                        l = v.lofi_filter.0;
+                        r = v.lofi_filter.1;
+                    }
+                    if profile.mono {
                         l = (l + r) * 0.5;
                         r = l;
                     }
-                    v.lofi_hold = (lofi_quantize(l, bits), lofi_quantize(r, bits));
+                    let (ql, qr) = if profile.adaptive {
+                        (lofi_adaptive(l, v.lofi_previous.0, profile.depth), lofi_adaptive(r, v.lofi_previous.1, profile.depth))
+                    } else {
+                        (
+                            lofi_quantize(l, profile.bits),
+                            lofi_quantize(r, profile.bits),
+                        )
+                    };
+                    v.lofi_hold = (ql, qr);
+                    v.lofi_previous = v.lofi_hold;
                 }
                 (l, r) = v.lofi_hold;
             }
@@ -5355,11 +5401,18 @@ mod tests {
 
     #[test]
     fn lofi_profiles_have_distinct_clock_and_quantizer_settings() {
-        assert_eq!(lofi_profile(0), Some((26040.0, 12, true)));
-        assert_eq!(lofi_profile(1), Some((22050.0, 12, false)));
-        assert_eq!(lofi_profile(2), Some((7812.5, 8, false)));
-        assert_eq!(lofi_profile(3), None);
+        for model in 0..10 {
+            assert!(lofi_profile(model).is_some(), "missing Lo-Fi mode {model}");
+        }
+        let sp = lofi_profile(0).expect("SP-1200 profile");
+        assert_eq!((sp.clock, sp.bits, sp.mono, sp.filter), (26040.0, 12, true, false));
+        let p6 = lofi_profile(4).expect("P-6 profile");
+        assert_eq!((p6.clock, p6.bits, p6.mono, p6.filter), (44100.0, 16, false, true));
+        let sp202 = lofi_profile(9).expect("SP-202 adaptive profile");
+        assert_eq!((sp202.clock, sp202.bits, sp202.adaptive), (7812.5, 4, true));
+        assert!(lofi_profile(10).is_none());
         assert!(lofi_quantize(0.1234, 8) != 0.1234);
+        assert!(lofi_adaptive(0.7, 0.0, 1.0).abs() > 0.0);
     }
 
     fn channel() -> Channel {

@@ -1740,7 +1740,7 @@ impl ClipEffect {
     }
 
     pub fn lofi(model: u8) -> Option<Self> {
-        (model < 3).then_some(Self::Lofi(model))
+        (model < 10).then_some(Self::Lofi(model))
     }
 }
 
@@ -1793,7 +1793,8 @@ mod clip_effect_tests {
         assert!(ClipEffect::halftime(3).is_none());
         assert!(ClipEffect::lofi(0).is_some());
         assert!(ClipEffect::lofi(2).is_some());
-        assert!(ClipEffect::lofi(3).is_none());
+        assert!(ClipEffect::lofi(9).is_some());
+        assert!(ClipEffect::lofi(10).is_none());
     }
 }
 
@@ -1847,7 +1848,7 @@ impl Clip {
         }
         match self.raw[82] {
             2 | 4 | 8 => ClipEffect::Halftime(self.raw[82]),
-            0x10..=0x12 => ClipEffect::Lofi(self.raw[82] - 0x10),
+            0x10..=0x19 => ClipEffect::Lofi(self.raw[82] - 0x10),
             _ => ClipEffect::None,
         }
     }
@@ -1865,7 +1866,7 @@ impl Clip {
                 self.raw[82] = divisor;
                 self.raw[83] = 0;
             }
-            ClipEffect::Lofi(model) if model < 3 => {
+            ClipEffect::Lofi(model) if model < 10 => {
                 self.raw[80..82].copy_from_slice(&Self::EFFECT_MAGIC);
                 self.raw[82] = 0x10 + model;
                 self.raw[83] = 0;
