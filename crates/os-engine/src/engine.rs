@@ -5398,6 +5398,7 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
 #[cfg(test)]
 mod tests {
     // spec: audio/pattern-controls.md (note repeat and channel control points, measured in FL)
+    use crate::wav;
     use super::*;
     use os_model::{Channel, ClipSource, Note, Pattern};
 
@@ -5432,7 +5433,19 @@ mod tests {
 
     #[test]
     fn lofi_clip_render_differs_from_bypass_for_every_mode() {
+        let path = std::env::temp_dir().join(format!("os-engine-lofi-{}.wav", std::process::id()));
+        let input: Vec<f32> = (0..48000)
+            .flat_map(|i| {
+                let t = i as f32 / 48000.0;
+                let transient = if i < 128 { 0.8 * (1.0 - t * 48000.0 / 128.0) } else { 0.0 };
+                let high = (std::f32::consts::TAU * 17000.0 * t).sin() * 0.35;
+                [transient + high, transient - high]
+            })
+            .collect();
+        wav::write_f32_stereo(&mut std::fs::File::create(&path).unwrap(), 48000, &input).unwrap();
         let mut baseline = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        baseline.channels[0].kind = ChannelKind::AudioClip;
+        baseline.channels[0].sample_path = Some(path.to_string_lossy().into_owned());
         let dry = render_song(&baseline);
         assert!(dry.iter().any(|sample| sample.abs() > 1.0e-4));
         for model in 0..10 {
@@ -5444,6 +5457,7 @@ mod tests {
                 "mode {model} did not alter rendered audio"
             );
         }
+        let _ = std::fs::remove_file(path);
     }
 
     fn channel() -> Channel {
