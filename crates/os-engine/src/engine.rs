@@ -3596,7 +3596,7 @@ impl Engine {
                 let inst = self.channels[t.channel].instrument.0.as_ref();
                 let ends = t.stop > 0.0 && inst.and_then(|i| i.lock().ok()).is_some_and(|i| i.voice_ends());
                 match t.cut {
-                    Some(_) if ends => {
+                    Some(_) if ends && t.speed >= 1.0 => {
                         let song = !self.looping && !self.live_only && self.end_tick > t.tick;
                         self.inst_offs.push((if song { self.end_tick } else { u64::MAX }, t.channel, k, voice, Some(t.origin())));
                     }
@@ -5260,7 +5260,7 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
             for (c, &fx) in clips.iter().zip(&fades) {
                 let start = u64::from(c.position);
                 let speed = c.effect().speed();
-                let len = (f64::from(c.length) / speed).ceil().max(1.0) as u64;
+                let len = u64::from(c.length);
                 if !c.muted {
                     end = end.max(start + len);
                 }
@@ -5294,7 +5294,7 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
 mod tests {
     // spec: audio/pattern-controls.md (note repeat and channel control points, measured in FL)
     use super::*;
-    use os_model::{Channel, Note, Pattern};
+    use os_model::{Channel, ClipSource, Note, Pattern};
 
     #[test]
     fn clip_speed_maps_to_native_rate_and_sampler_pitch() {
@@ -6303,6 +6303,16 @@ mod tests {
             ..Default::default()
         }];
         p
+    }
+
+    #[test]
+    fn slowed_audio_clip_still_cuts_at_timeline_end() {
+        let mut p = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        p.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Halftime(2));
+
+        let (scheduled, end) = schedule(&p, PlayMode::Song, &mut EngineReport::default());
+        let clip = scheduled.iter().find(|s| s.cut.is_some()).expect("audio clip trigger");
+        assert_eq!((clip.len, clip.cut, end), (384, Some(384), 384));
     }
 
     /// A pattern's bars are its own (spec: audio/song-structure.md, "Time signatures and a pattern's length"): the
