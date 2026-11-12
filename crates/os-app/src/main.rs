@@ -20,6 +20,7 @@ mod help_links;
 mod diagnostics;
 mod audio_cfg;
 mod auto_close;
+mod scrolling;
 mod autoscroll;
 mod backup;
 #[cfg(test)]
