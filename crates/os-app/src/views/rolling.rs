@@ -150,8 +150,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         let y0 = mid - hi * amp;
         let y1 = mid - lo * amp;
         let ink = if palette == 2 {
-            let span = s.roll.cols.len().saturating_sub(1).max(1) as f32;
-            let hue = (c as f32 / span + pulse * 0.035).rem_euclid(1.0);
+            let hue = spectrum_hue(c, s.roll.cols.len());
             let fill = spectrum_color(hue, 0.30);
             let outline = spectrum_color(hue, 0.94);
             let top = y0.min(y1);
@@ -230,9 +229,15 @@ fn spectrum_color(hue: f32, alpha: f32) -> os_ui::Color {
     os_ui::Color::from_hsl_pub(hue.rem_euclid(1.0) * 360.0, 1.0, 0.5, (alpha * 255.0) as u8)
 }
 
+/// Fixed ROYGBIV mask across the visible strip: red at the left edge, violet at the right.
+fn spectrum_hue(column: usize, columns: usize) -> f32 {
+    let span = columns.saturating_sub(1).max(1) as f32;
+    (column as f32 / span).clamp(0.0, 1.0) * (5.0 / 6.0)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::spectrum_color;
+    use super::{spectrum_color, spectrum_hue};
 
     #[test]
     fn rainbow_palette_wraps_smoothly_and_preserves_alpha() {
@@ -245,5 +250,13 @@ mod tests {
         assert!(a.r > a.g && a.r > a.b);
         assert!(green.g > green.r && green.g > green.b);
         assert!(blue.b > blue.r && blue.b > blue.g);
+    }
+
+    #[test]
+    fn rainbow_mask_maps_visible_width_from_red_to_violet() {
+        assert_eq!(spectrum_hue(0, 701), 0.0);
+        assert!((spectrum_hue(350, 701) - 5.0 / 12.0).abs() < 0.001);
+        assert!((spectrum_hue(700, 701) - 5.0 / 6.0).abs() < 0.001);
+        assert_eq!(spectrum_hue(0, 1), 0.0);
     }
 }
