@@ -4090,10 +4090,25 @@ fn lofi_quantize(value: f32, bits: u8) -> f32 {
 }
 
 fn lofi_adaptive(value: f32, previous: f32, depth: f32) -> f32 {
-    let delta = (value - previous) * depth;
-    let exponent = delta.abs().max(1.0e-6).log2().floor();
-    let step = 2.0f32.powf(exponent - 3.0).max(1.0e-6);
+    let delta = value - previous;
+    let scale = value.abs().max(previous.abs()).max(1.0e-3);
+    let step = (scale * depth / 8.0).max(1.0e-5);
     previous + (delta / step).round().clamp(-8.0, 7.0) * step
+}
+
+fn lofi_quantized(profile: LofiProfile, mut l: f32, mut r: f32, previous: (f32, f32)) -> (f32, f32) {
+    if profile.mono {
+        l = (l + r) * 0.5;
+        r = l;
+    }
+    if profile.adaptive {
+        (
+            lofi_adaptive(l, previous.0, profile.depth),
+            lofi_adaptive(r, previous.1, profile.depth),
+        )
+    } else {
+        (lofi_quantize(l, profile.bits), lofi_quantize(r, profile.bits))
+    }
 }
 
 /// Adds one voice into its channel's insert bus for block frames `offset..end`.
@@ -4214,18 +4229,7 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
                         l = v.lofi_filter.0;
                         r = v.lofi_filter.1;
                     }
-                    if profile.mono {
-                        l = (l + r) * 0.5;
-                        r = l;
-                    }
-                    let (ql, qr) = if profile.adaptive {
-                        (lofi_adaptive(l, v.lofi_previous.0, profile.depth), lofi_adaptive(r, v.lofi_previous.1, profile.depth))
-                    } else {
-                        (
-                            lofi_quantize(l, profile.bits),
-                            lofi_quantize(r, profile.bits),
-                        )
-                    };
+                    let (ql, qr) = lofi_quantized(profile, l, r, v.lofi_previous);
                     v.lofi_hold = (ql, qr);
                     v.lofi_previous = v.lofi_hold;
                 }
@@ -5413,6 +5417,11 @@ mod tests {
         assert!(lofi_profile(10).is_none());
         assert!(lofi_quantize(0.1234, 8) != 0.1234);
         assert!(lofi_adaptive(0.7, 0.0, 1.0).abs() > 0.0);
+        for model in 0..10 {
+            let profile = lofi_profile(model).unwrap();
+            let out = lofi_quantized(profile, 0.73123, -0.41789, (0.0, 0.0));
+            assert!(out != (0.73123, -0.41789), "mode {model} did not process audio");
+        }
     }
 
     fn channel() -> Channel {
