@@ -231,7 +231,11 @@ impl App {
     /// Lemon it stays laid over Lemon even where it is stock Dark.
     pub(crate) fn theme_text(&self) -> String {
         let text = applied_text(&self.state, self.design());
-        if FlTheme::parse(&text).colors == Some(Design::Lemon) { fl::remove_key(&text, fl::COLORS_KEY) } else { text }
+        if matches!(FlTheme::parse(&text).colors, Some(Design::Lemon | Design::Lime)) {
+            fl::remove_key(&text, fl::COLORS_KEY)
+        } else {
+            text
+        }
     }
 
     /// Applies an edited theme `text` to the skin in use, live: the window, the skin tiles' previews (the theme tiles

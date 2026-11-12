@@ -5248,11 +5248,11 @@ impl App {
         let design = self.design();
         let st = &mut self.state.settings;
         let themes: Vec<_> = st.themes.iter().map(|(_, t)| os_theme::FlTheme::parse(t)).collect();
-        // With no theme file the skin shows its own colours: its own tile (the Lemon or Citrus theme, listed first in
+        // With no theme file the skin shows its own colours: its own tile (the built-in skin themes, listed first in
         // `Design::ALL` order); so does stock Dark without Lemon Studio's key.
         let own = Design::ALL.iter().position(|d| *d == design).unwrap_or(0);
         st.preset = match (&chosen, &applied) {
-            (None, None) if design == Design::Lemon || self.theme.colors == os_theme::Palette::default() => own,
+            (None, None) if design != Design::Citrus || self.theme.colors == os_theme::Palette::default() => own,
             (None, None) => usize::MAX,
             (None, Some(_)) => own,
             (Some(th), _) => themes.iter().position(|t| t.same_colours(th)).or(th.is_stock().then_some(own)).unwrap_or(usize::MAX),
@@ -5281,7 +5281,7 @@ impl App {
         // General ▸ System's association check shows what Windows says now (`crate::file_assoc`).
         #[cfg(windows)]
         self.assoc_read();
-        // The Lemon and Citrus themes, the built-in themes, then the user's own (`crate::theme_library`).
+        // The built-in skin themes, the built-in themes, then the user's own (`crate::theme_library`).
         self.state.settings.name_edit = None;
         self.theme_list();
         self.sync_preset();
@@ -10497,6 +10497,7 @@ fn save_design(d: Design) {
 pub fn design_theme(d: Design, saved: bool) -> Theme {
     match d {
         Design::Lemon => skin_theme(Design::Lemon, "Lemon", saved.then(saved_fl_text).flatten().as_deref()),
+        Design::Lime => skin_theme(Design::Lime, "Lime", saved.then(saved_fl_text).flatten().as_deref()),
         Design::Citrus if saved => load_theme_inner(),
         Design::Citrus => Theme::default(),
     }
@@ -11296,19 +11297,19 @@ mod tests {
         let mut app = App::new(None);
         app.open_settings(THEME);
         let st = &app.state.settings;
-        assert_eq!((st.skin_previews.len(), st.theme_previews.len()), (2, PRESETS.len() + 2));
-        assert_eq!(st.themes[..2].iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["Lemon", "Citrus"]);
+        assert_eq!((st.skin_previews.len(), st.theme_previews.len()), (3, PRESETS.len() + 3));
+        assert_eq!(st.themes[..3].iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["Lemon", "Citrus", "Lime"]);
         assert_eq!((st.skin, st.preset), (1, 1), "Citrus skin, no theme: the Citrus theme's tile");
         // A theme in Citrus, then the Lemon skin keeps it.
         let (name, text) = PRESETS[2];
-        app.settings_act(SAct::Preset(4));
+        app.settings_act(SAct::Preset(5));
         assert_eq!(app.theme.colors, os_theme::fl::palette(&FlTheme::parse(text)));
         assert_eq!(std::fs::read_to_string(dir.join("current.flstheme")).unwrap(), text);
         app.settings_act(SAct::Skin(0));
         assert_eq!(app.design(), Design::Lemon);
         assert_eq!(app.theme.colors, os_theme::design::palette(Design::Lemon, Some(&FlTheme::parse(text))));
-        assert_eq!((app.state.settings.skin, app.state.settings.preset), (0, 4), "{name}");
-        assert_eq!(app.state.settings.theme_previews[4], app.theme.colors, "the tile previews what is applied");
+        assert_eq!((app.state.settings.skin, app.state.settings.preset), (0, 5), "{name}");
+        assert_eq!(app.state.settings.theme_previews[5], app.theme.colors, "the tile previews what is applied");
         // The Citrus theme on the Lemon skin: Lemon's shapes, the stock look's colours; kept across a skin switch.
         let lemon_own = os_theme::design::palette(Design::Lemon, None);
         app.settings_act(SAct::Preset(1));
@@ -11340,7 +11341,7 @@ mod tests {
         // The page draws both lists of tiles with their hits.
         if let Ok(mut c) = Canvas::new(1920, 1080, 1.0) {
             frame(&mut app, &mut c, None);
-            for a in [SAct::Skin(0), SAct::Skin(1), SAct::Preset(0), SAct::Preset(PRESETS.len() + 1)] {
+            for a in [SAct::Skin(0), SAct::Skin(1), SAct::Skin(2), SAct::Preset(0), SAct::Preset(PRESETS.len() + 2)] {
                 hit_rect(&app, &Action::Settings(a));
             }
         }

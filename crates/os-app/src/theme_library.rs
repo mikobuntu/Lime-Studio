@@ -344,7 +344,7 @@ impl App {
                 let taken: Vec<String> = self.state.settings.themes.iter().map(|(n, _)| n.to_lowercase()).collect();
                 let base = format!("{name} copy");
                 let new = std::iter::once(base.clone()).chain((2..).map(|k| format!("{base} {k}"))).find(|n| !taken.contains(&n.to_lowercase()))?;
-                // The Lemon and Citrus themes stay the skins' own colours as copies too.
+                // The built-in skin themes stay the skins' own colours as copies too.
                 Some(match self.write_user_theme(&new, &text) {
                     Ok(()) => {
                         self.reload_themes();
@@ -491,7 +491,7 @@ impl App {
         self.invalidate();
     }
 
-    /// The Themes tiles: the Lemon and Citrus themes, the built-in themes, then the user's (`user_dir`).
+    /// The Themes tiles: the built-in skin themes, the built-in themes, then the user's (`user_dir`).
     pub(crate) fn theme_list(&mut self) {
         let st = &mut self.state.settings;
         st.themes = os_theme::Design::ALL

@@ -6,10 +6,11 @@
 //! in use.
 //!
 //! `Citrus` (formerly Classic) is the measured default look. `Lemon` is Lemon Studio's own look: neutral greys, one
-//! lemon-yellow brand colour and rounded-square controls (knobs stay round). It re-colours every token and every
+//! lemon-yellow brand colour and rounded-square controls (knobs stay round). `Lime` is a darker green-accented look.
+//! Each skin re-colours every token and every
 //! role-mapped literal (`Palette::s/a/h/tx/led`) through a `DesignMap` (a neutral lightness ramp plus key colours), sets
 //! the tokens the map can't get right outright, and tells the widget kit which shape language to draw (`Style`). A
-//! theme other than the stock Dark one is laid over Lemon's colours by a `Retint`.
+//! theme other than the stock Dark one is laid over the selected skin's colours by a `Retint`.
 // spec: ui/lemon-design.md
 
 // This code is a part of L e m o n S t u d i o.
@@ -25,16 +26,19 @@ pub enum Design {
     Citrus,
     /// Lemon Studio's own look: lemon on neutral greys, rounded squares.
     Lemon,
+    /// Lemon Studio's dark lime look: lime on near-black surfaces, rounded squares.
+    Lime,
 }
 
 impl Design {
     /// In the order Settings > Theme > Skins shows them.
-    pub const ALL: [Design; 2] = [Design::Lemon, Design::Citrus];
+    pub const ALL: [Design; 3] = [Design::Lemon, Design::Citrus, Design::Lime];
 
     pub fn name(self) -> &'static str {
         match self {
             Design::Citrus => "Citrus",
             Design::Lemon => "Lemon",
+            Design::Lime => "Lime",
         }
     }
 
@@ -55,6 +59,7 @@ impl Design {
         match self {
             Design::Citrus => Style::CITRUS,
             Design::Lemon => Style::LEMON,
+            Design::Lime => Style::LIME,
         }
     }
 }
@@ -74,13 +79,14 @@ pub struct Style {
 impl Style {
     pub const CITRUS: Style = Style { design: Design::Citrus, radius: 3.0, radius_small: 2.5, radius_panel: 4.0 };
     pub const LEMON: Style = Style { design: Design::Lemon, radius: 6.0, radius_small: 4.0, radius_panel: 10.0 };
+    pub const LIME: Style = Style { design: Design::Lime, radius: 6.0, radius_small: 4.0, radius_panel: 10.0 };
 
     pub fn is(&self, d: Design) -> bool {
         self.design == d
     }
 
     pub fn lemon(&self) -> bool {
-        self.design == Design::Lemon
+        matches!(self.design, Design::Lemon | Design::Lime)
     }
 }
 
@@ -198,6 +204,25 @@ pub mod lemon {
     pub const TEXT: Color = Color::rgb(0xececec);
 }
 
+/// Lime's dark palette: the same rounded-square language as Lemon, with a near-black base and green highlights.
+pub mod lime {
+    use crate::Color;
+    /// Main colour: selection, the playhead, lit steps and active controls.
+    pub const MAIN: Color = Color::rgb(0xb7f34a);
+    /// Highlight: bright top of lit controls and selected notes.
+    pub const HIGHLIGHT: Color = Color::rgb(0xe4ff91);
+    /// Main surface.
+    pub const DARK: Color = Color::rgb(0x171f20);
+    /// Raised surface and control tracks.
+    pub const DARK_HIGHLIGHT: Color = Color::rgb(0x35443a);
+    /// Dark green ink on bright controls.
+    pub const COLORED_DARK: Color = Color::rgb(0x102b08);
+    /// Darker lime for rims and meter bodies.
+    pub const DEEP: Color = Color::rgb(0x4f8e1e);
+    /// Text on dark surfaces.
+    pub const TEXT: Color = Color::rgb(0xe8f1e8);
+}
+
 /// Lemon: Classic lightness -> Lemon lightness. Classic's toolbar (0.19) lands on DARK (#3b3b3b, 0.231) and the
 /// 0.33 raised greys on DARK_HIGHLIGHT (#666666, 0.40); the near-black lists and rulers lift to about #151515.
 const LEMON_RAMP: &[(f32, f32)] = &[
@@ -228,7 +253,51 @@ fn map_of(d: Design) -> Option<DesignMap> {// This code is a part of L e m o n S
             text: lemon::TEXT,
             text_bg: lemon::DARK,
         }),
+        Design::Lime => None,
     }
+}
+
+fn lime_palette() -> Palette {
+    let mut p = palette(Design::Lemon, None);
+    for name in Palette::NAMES {
+        let c = p.get(name).expect("token");
+        let v = match fl::role(name) {
+            fl::Role::Surface | fl::Role::StepEven | fl::Role::StepOdd => c.shade(-0.22),
+            fl::Role::Accent | fl::Role::Mute => fl::rekey(c, lemon::MAIN, lime::MAIN),
+            fl::Role::Highlight => {
+                fl::rekey(fl::rekey(c, lemon::MAIN, lime::MAIN), lemon::HIGHLIGHT, lime::HIGHLIGHT)
+            }
+            fl::Role::Fixed if matches!(
+                *name,
+                "step_on"
+                    | "note_top"
+                    | "note_bottom"
+                    | "note_rim"
+                    | "note_text"
+                    | "note_sel_top"
+                    | "note_sel_bottom"
+                    | "note_sel_rim"
+                    | "note_sel_text"
+                    | "key_label"
+                    | "clip"
+                    | "cat_project"
+                    | "velocity"
+                    | "velocity_dot"
+                    | "meter_low"
+                    | "meter_high"
+            ) =>
+                fl::rekey(fl::rekey(c, lemon::MAIN, lime::MAIN), lemon::HIGHLIGHT, lime::HIGHLIGHT),
+            fl::Role::Fixed => c,
+            fl::Role::Text => c,
+        };
+        *p.get_mut(name).expect("token") = v;
+    }
+    p.style = Style::LIME;
+    p.xf = fl::Xform {
+        retint: Some(Retint::lime(&FlTheme::parse(&default_text(Design::Lime)))),
+        ..fl::Xform::default()
+    };
+    p
 }
 
 /// Tokens a design sets outright (the ones the role map can't get right: signal colours, notes, keys, steps).
@@ -236,7 +305,7 @@ fn overrides(d: Design) -> Vec<(&'static str, Color)> {
     let c = Color::rgb;
     use lemon::*;
     match d {
-        Design::Citrus => vec![],
+        Design::Citrus | Design::Lime => vec![],
         Design::Lemon => vec![
             ("toolbar", DARK),
             ("toolbar_line", c(0x2a2a2a)),
@@ -367,10 +436,22 @@ fn overrides(d: Design) -> Vec<(&'static str, Color)> {
 }
 
 /// The palette of skin `design` coloured by `theme` (a `.flstheme`). The stock Dark theme (whatever its options), or
-/// none, leaves a skin its own colours: Citrus the measured look, Lemon the brand palette; any other theme colours
-/// Citrus through `fl::palette` and is laid over Lemon's colours by a `Retint`. The theme's workspace picture goes with
+/// none, leaves a skin its own colours: Citrus the measured look, Lemon the brand palette, Lime the dark lime palette;
+/// any other theme colours Citrus through `fl::palette` and is laid over the selected skin's colours by a `Retint`. The theme's workspace picture goes with
 /// it on either skin, also where it keeps the skin's own colours (spec: ui/flstheme.md §3).
 pub fn palette(design: Design, theme: Option<&FlTheme>) -> Palette {
+    if design == Design::Lime {
+        let mut p = lime_palette();
+        if theme.and_then(|t| t.colors) == Some(Design::Lime) {
+            p.wallpaper = theme.and_then(fl::wallpaper);
+            return p;
+        }
+        if let Some(th) = theme.filter(|t| !t.is_stock()) {
+            retint(&mut p, th);
+        }
+        p.wallpaper = theme.and_then(fl::wallpaper);
+        return p;
+    }
     let mut p = skin_palette(design, theme);
     p.wallpaper = theme.and_then(fl::wallpaper);
     p
@@ -382,6 +463,12 @@ fn skin_palette(design: Design, theme: Option<&FlTheme>) -> Palette {
     // Citrus with the Citrus theme is the stock Dark theme, as usual.
     match (design, theme.and_then(|t| t.colors)) {
         (Design::Lemon, Some(Design::Lemon)) => return palette(design, None),
+        (Design::Lime, Some(Design::Lime)) => return palette(design, None),
+        (Design::Citrus, Some(Design::Lime)) => {
+            let mut p = palette(Design::Lime, None);
+            p.style = Design::Citrus.style();
+            return p;
+        }
         (Design::Citrus, Some(Design::Lemon)) => {
             let mut p = palette(Design::Lemon, None);
             p.style = Design::Citrus.style();
@@ -449,17 +536,26 @@ pub struct Retint {
 impl Retint {
     /// `th` over the Lemon skin.
     pub fn lemon(th: &FlTheme) -> Retint {
+        Self::for_skin(th, lemon::MAIN, lemon::TEXT, lemon::DARK)
+    }
+
+    /// `th` over the Lime skin.
+    pub fn lime(th: &FlTheme) -> Retint {
+        Self::for_skin(th, lime::MAIN, lime::TEXT, lime::DARK)
+    }
+
+    fn for_skin(th: &FlTheme, key: Color, text_color: Color, background: Color) -> Retint {
         let mut r = Retint {
             surface: th.surface,
-            key: lemon::MAIN,
+            key,
             accent: th.selected,
             highlight: th.highlight,
             mute: th.mute,
-            text_from: (lemon::TEXT, lemon::DARK),
-            text_to: (lemon::TEXT, lemon::DARK),
+            text_from: (text_color, background),
+            text_to: (text_color, background),
         };
-        let bg = r.surface(lemon::DARK);
-        let text = th.text_color.unwrap_or(if bg.hsl().2 > 0.5 { Color::rgb(0x1e1e1e) } else { lemon::TEXT });
+        let bg = r.surface(background);
+        let text = th.text_color.unwrap_or(if bg.hsl().2 > 0.5 { Color::rgb(0x1e1e1e) } else { text_color });
         r.text_to = (fl::readable(text, bg, 0.38), bg);
         r
     }
@@ -520,6 +616,16 @@ pub fn default_text(d: Design) -> String {
                 v("TextColor", lemon::TEXT)
             )
         }
+        Design::Lime => {
+            let v = |key: &str, c: Color| format!("{key}={}\n", fl::colour_value(key, c));
+            format!(
+                "Hue=0\nSaturation=-256\nLightness=-210\nContrast=-8\nText=0\n{}{}{}{}BackMode=2\n",
+                v("Selected", lime::MAIN),
+                v("Highlight", lime::HIGHLIGHT),
+                v("Mute", lime::MAIN),
+                v("TextColor", lime::TEXT)
+            )
+        }
     }
 }
 
@@ -534,7 +640,7 @@ pub fn skin_text(d: Design) -> String {
 /// fixed tokens drawn in the lemon key colour (lit steps, notes, key labels, the default clip, the project category)
 /// follow the theme's selection colour; then what the theme colours directly (`fl::finish`).
 fn retint(p: &mut Palette, th: &FlTheme) {
-    let r = Retint::lemon(th);
+    let r = if p.style.design == Design::Lime { Retint::lime(th) } else { Retint::lemon(th) };
     let citrus = fl::palette(th);
     let skin = p.clone();
     for name in Palette::NAMES {
@@ -634,6 +740,26 @@ mod tests {
         ] {
             assert!(contrast(fg, bg) >= 0.38, "{fg} on {bg}");
         }
+    }
+
+    #[test]
+    fn lime_is_registered_and_dark_with_lime_highlights() {
+        assert_eq!(Design::parse("lime"), Some(Design::Lime));
+        assert_eq!(Design::Lime.name(), "Lime");
+        assert_eq!(Design::Lime.style(), Style::LIME);
+        let p = palette(Design::Lime, None);
+        assert_eq!(p.style.design, Design::Lime);
+        for c in [p.accent, p.pill, p.on_top] {
+            let (h, s, _) = c.hsl();
+            assert!((h - lime::MAIN.hsl().0).abs() < 30.0 && s > 0.6, "{c}");
+        }
+        assert!(p.toolbar.hsl().2 < 0.2);
+        assert!(p.workspace.hsl().2 < 0.2);
+        for (fg, bg) in [(p.text, p.toolbar), (p.glyph, p.toolbar), (p.pill_text, p.pill), (p.on_glyph, p.on_bottom)] {
+            assert!(contrast(fg, bg) >= 0.38, "{fg} on {bg}");
+        }
+        assert_eq!(FlTheme::parse(&skin_text(Design::Lime)).colors, Some(Design::Lime));
+        assert_eq!(palette(Design::Lime, Some(&FlTheme::parse(&skin_text(Design::Lime)))), p);
     }
 
     /// A theme colours the Lemon skin (spec: ui/theme-presets.md "Skins"): Lemon's shapes stay, the theme's

@@ -34,7 +34,7 @@ pub enum SAct {
     Button(&'static str),
     /// Skins tile: `os_theme::Design::ALL[i]`.
     Skin(usize),
-    /// Themes tile `SettingsUi::themes[i]`: the Lemon and Citrus themes (the skins' own colours), then the rest.
+    /// Themes tile `SettingsUi::themes[i]`: the built-in skin themes (the skins' own colours), then the rest.
     Preset(usize),
     /// Theme ▸ Adjustments knob `i` (`crate::theme_adjust::KNOBS`): a drag or the wheel turns it, a middle click restores
     /// the chosen theme's value.
@@ -547,7 +547,7 @@ pub enum Row {
 pub enum TileList {
     /// The skins (`os_theme::Design::ALL`), each previewed under the applied theme.
     Skins,
-    /// The themes (the Lemon and Citrus themes first), each previewed in the skin in use.
+    /// The themes (the built-in skin themes first), each previewed in the skin in use.
     Themes,
 }
 

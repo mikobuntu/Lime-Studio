@@ -377,7 +377,7 @@ impl Palette {
     }
 }
 
-/// Lemon brand colours (`design::lemon`) as the applied theme has them. A theme laid over the Lemon skin
+/// Skin brand colours (`design::lemon` or `design::lime`) as the applied theme has them. A theme laid over a rounded skin
 /// (`design::Retint`) moves lit and "on" colours to its highlight (`brand_lit`), selection to its selection
 /// (`brand_sel`), enable switches to its mute colour (`brand_led`), the brand greys to its surfaces (`brand_grey`) and
 /// brand text to its text (`brand_ink`); under the skin's own colours each is returned as given (spec:
