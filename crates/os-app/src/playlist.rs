@@ -308,6 +308,7 @@ pub enum Cmd {
     ClipUniqueSample(usize),
     /// An audio clip rendered in place, clearing clip-local processing from the replacement.
     ClipBounce(usize),
+    ClipLofi(usize, u8),
     ClipEditSource(usize),
     ClipSelectSimilar(usize),
     ClipRename(usize),
@@ -3056,6 +3057,20 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
                 PItem::new("Bounce in place", Cmd::ClipBounce(i)),
                 PItem::sep(),
                 PItem::sub(
+                    "Lo-Fi",
+                    [("Off", 3), ("SP-1200", 0), ("P-6", 1), ("SP-202", 2)]
+                        .into_iter()
+                        .map(|(label, model)| {
+                            PItem::new(label, Cmd::ClipLofi(i, model)).mark(Mark::Radio(match (model, c.effect()) {
+                                (3, os_model::ClipEffect::None) => true,
+                                (m, os_model::ClipEffect::Lofi(current)) => m == current,
+                                _ => false,
+                            }))
+                        })
+                        .collect(),
+                ),
+                PItem::sep(),
+                PItem::sub(
                     "Halftime",
                     [1, 2, 4, 8]
                         .into_iter()
@@ -5298,6 +5313,18 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
         }
         Cmd::ClipUniqueSample(i) => Some(make_unique_sample(s, i)),
         Cmd::ClipBounce(i) => Some(bounce_in_place(s, i)),
+        Cmd::ClipLofi(i, model) => {
+            let effect = if model == 3 { os_model::ClipEffect::None } else { os_model::ClipEffect::lofi(model).unwrap_or(os_model::ClipEffect::None) };
+            if !matches!(clips(s).get(i).map(|c| (c.source, c.effect())), Some((ClipSource::Channel(ch), old)) if source_kind(s, ClipSource::Channel(ch)) == PickKind::Audio && old != effect) {
+                return None;
+            }
+            snapshot_as(s, "Clip effect");
+            if let Some(c) = arr_mut(s).clips.get_mut(i) {
+                c.set_effect(effect);
+            }
+            s.piano.dirty = true;
+            None
+        }
         Cmd::ClipEditSource(i) => {
             if let Some(ClipSource::Pattern(n)) = clips(s).get(i).map(|c| c.source) {
                 s.pattern = n;

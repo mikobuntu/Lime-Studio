@@ -85,6 +85,8 @@ struct Trigger {
     rate: f64,
     /// Clip-local playback speed. Native sample voices multiply their step by this; hosted samplers receive it as pitch.
     speed: f64,
+    /// Generic vintage sampler profile applied to native sample voices.
+    lofi: Option<u8>,
     /// Tick at which the voice is cut (end of an audio clip), if any.
     cut: Option<u64>,
     /// Velocity gain and note pan (âˆ’1..=1); the channel's volume and pan apply while it plays.
@@ -715,6 +717,10 @@ struct Voice {
     off: Option<u64>,
     /// An audio clip's fades and gain.
     shape: Option<ClipShape>,
+    /// Generic vintage sampler profile.
+    lofi: Option<u8>,
+    lofi_phase: f64,
+    lofi_hold: (f32, f32),
     /// The channel buffer it plays (`Trigger::buf`).
     buf: u16,
     /// Its note's key, and where slide notes have moved it.
@@ -1559,6 +1565,7 @@ impl Engine {
                     // The note's fine pitch is the voice's pitch offset, kept apart from its key (spec: audio/voice-levels.md).
                     rate: laws::playback_rate(n.key, laws::fine_pitch_cents(n.fine)),
                     speed: n.speed,
+                    lofi: n.lofi,
                     fine: laws::fine_pitch_cents(n.fine) as f32 / 100.0,
                     cut: n.cut,
                     // A playlist audio clip's voice has its own volume in place of a velocity: unity through a channel at
@@ -2215,6 +2222,9 @@ impl Engine {
             age: 0,
             off: None,
             shape: None,
+            lofi: None,
+            lofi_phase: 1.0,
+            lofi_hold: (0.0, 0.0),
             buf,
             key,
             slide: VoiceSlide::new(step, velocity, pan),
@@ -3632,6 +3642,9 @@ impl Engine {
             age: 0,
             off: None,
             shape: t.shape,
+            lofi: t.lofi,
+            lofi_phase: 1.0,
+            lofi_hold: (0.0, 0.0),
             buf: t.buf,
             key: t.key,
             slide: VoiceSlide::new(t.rate * t.speed, t.velocity, t.pan),
@@ -4039,6 +4052,20 @@ impl Engine {
 /// Resampling window half-width in source samples.
 const SINC_W: f64 = 13.5;
 
+fn lofi_profile(model: u8) -> Option<(f64, u8, bool)> {
+    match model {
+        0 => Some((26040.0, 12, true)),
+        1 => Some((22050.0, 12, false)),
+        2 => Some((7812.5, 8, false)),
+        _ => None,
+    }
+}
+
+fn lofi_quantize(value: f32, bits: u8) -> f32 {
+    let levels = ((1u32 << bits.min(24)) - 1) as f32;
+    (((value.clamp(-1.0, 1.0) * 0.5 + 0.5) * levels).round() / levels * 2.0 - 1.0).clamp(-1.0, 1.0)
+}
+
 /// Adds one voice into its channel's insert bus for block frames `offset..end`.
 /// Returns false when the voice has finished.
 ///
@@ -4125,7 +4152,7 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
                 *left as f32 / *len as f32
             }
         };
-        let (l, r) = if exact {
+        let (mut l, mut r) = if exact {
             let i = pos as usize;
             (s.left[i], s.right[i])
         } else if w <= 1.0 {
@@ -4145,6 +4172,20 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
             }
             (l as f32, r as f32)
         };
+        if let Some(model) = v.lofi {
+            if let Some((clock, bits, mono)) = lofi_profile(model) {
+                v.lofi_phase += clock * ch.frame_s;
+                if v.lofi_phase >= 1.0 {
+                    v.lofi_phase -= v.lofi_phase.floor();
+                    if mono {
+                        l = (l + r) * 0.5;
+                        r = l;
+                    }
+                    v.lofi_hold = (lofi_quantize(l, bits), lofi_quantize(r, bits));
+                }
+                (l, r) = v.lofi_hold;
+            }
+        }
         if let Some(r) = glide {
             // The volume parameter glides linearly and the volume law applies to it; the pan glides linearly
             // in the left / right gains (spec: audio/pattern-controls.md).
@@ -4912,6 +4953,8 @@ struct Sched {
     len: u64,
     /// Clip-local playback speed; resampling changes pitch together with duration.
     speed: f64,
+    /// Generic vintage sampler profile applied to native sample voices.
+    lofi: Option<u8>,
     /// Seconds into the sample where the voice starts (audio clip window start).
     from_s: f64,
     /// Seconds into the sample where an audio clip's window ends (`None`: the sample's end).
@@ -4942,6 +4985,7 @@ impl Sched {
             cut: None,
             len: u64::from(n.length),
             speed: 1.0,
+            lofi: None,
             from_s: 0.0,
             to_s: None,
             clip: None,
@@ -5259,7 +5303,12 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
             let fades = os_model::crossfade::playing(project, clips, project.tempo.unwrap_or(140.0));
             for (c, &fx) in clips.iter().zip(&fades) {
                 let start = u64::from(c.position);
-                let speed = c.effect().speed();
+                let effect = c.effect();
+                let speed = effect.speed();
+                let lofi = match effect {
+                    os_model::ClipEffect::Lofi(model) => Some(model),
+                    _ => None,
+                };
                 let len = u64::from(c.length);
                 if !c.muted {
                     end = end.max(start + len);
@@ -5278,7 +5327,7 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
                         Some(ChannelKind::AudioClip | ChannelKind::Sampler) => {
                             let from_s = c.window.map_or(0.0, |w| w.0.max(0.0) / 1000.0);
                             let to_s = c.window.filter(|w| w.0 >= 0.0 && w.1 >= 0.0).map(|w| w.1 / 1000.0);
-                            out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, speed, from_s, to_s, clip: ClipFx::of(c, fx), slide: false, colour: 0, porta: false, swing: None });
+                            out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, speed, lofi, from_s, to_s, clip: ClipFx::of(c, fx), slide: false, colour: 0, porta: false, swing: None });
                         }
                         Some(ChannelKind::Automation) => {}
                         _ => report.automation_clips_ignored += 1,
@@ -5302,6 +5351,15 @@ mod tests {
         assert!((speed_pitch_semitones(0.5) + 12.0).abs() < 1e-6);
         assert!((speed_pitch_semitones(0.25) + 24.0).abs() < 1e-6);
         assert!((speed_pitch_semitones(0.125) + 36.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lofi_profiles_have_distinct_clock_and_quantizer_settings() {
+        assert_eq!(lofi_profile(0), Some((26040.0, 12, true)));
+        assert_eq!(lofi_profile(1), Some((22050.0, 12, false)));
+        assert_eq!(lofi_profile(2), Some((7812.5, 8, false)));
+        assert_eq!(lofi_profile(3), None);
+        assert!(lofi_quantize(0.1234, 8) != 0.1234);
     }
 
     fn channel() -> Channel {

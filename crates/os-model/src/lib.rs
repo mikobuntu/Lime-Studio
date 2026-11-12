@@ -1721,6 +1721,8 @@ pub enum ClipEffect {
     None,
     /// Resample the clip at one of the generic HalfTime-style speed ratios.
     Halftime(u8),
+    /// Apply a generic vintage sampler profile.
+    Lofi(u8),
 }
 
 impl ClipEffect {
@@ -1729,11 +1731,16 @@ impl ClipEffect {
         match self {
             Self::None => 1.0,
             Self::Halftime(divisor) => 1.0 / f64::from(divisor.max(1)),
+            Self::Lofi(_) => 1.0,
         }
     }
 
     pub fn halftime(divisor: u8) -> Option<Self> {
         matches!(divisor, 2 | 4 | 8).then_some(Self::Halftime(divisor))
+    }
+
+    pub fn lofi(model: u8) -> Option<Self> {
+        (model < 3).then_some(Self::Lofi(model))
     }
 }
 
@@ -1773,6 +1780,8 @@ mod clip_effect_tests {
 
         clip.set_effect(ClipEffect::None);
         assert_eq!(clip.effect(), ClipEffect::None);
+        clip.set_effect(ClipEffect::Lofi(1));
+        assert_eq!(clip.effect(), ClipEffect::Lofi(1));
     }
 
     #[test]
@@ -1782,6 +1791,9 @@ mod clip_effect_tests {
         assert!(ClipEffect::halftime(8).is_some());
         assert!(ClipEffect::halftime(1).is_none());
         assert!(ClipEffect::halftime(3).is_none());
+        assert!(ClipEffect::lofi(0).is_some());
+        assert!(ClipEffect::lofi(2).is_some());
+        assert!(ClipEffect::lofi(3).is_none());
     }
 }
 
@@ -1835,6 +1847,7 @@ impl Clip {
         }
         match self.raw[82] {
             2 | 4 | 8 => ClipEffect::Halftime(self.raw[82]),
+            0x10..=0x12 => ClipEffect::Lofi(self.raw[82] - 0x10),
             _ => ClipEffect::None,
         }
     }
@@ -1844,14 +1857,20 @@ impl Clip {
         match effect {
             ClipEffect::None => {
                 if self.raw[80..82] == Self::EFFECT_MAGIC {
-                    self.raw[80..83].fill(0);
+                    self.raw[80..84].fill(0);
                 }
             }
             ClipEffect::Halftime(divisor) if matches!(divisor, 2 | 4 | 8) => {
                 self.raw[80..82].copy_from_slice(&Self::EFFECT_MAGIC);
                 self.raw[82] = divisor;
+                self.raw[83] = 0;
             }
-            ClipEffect::Halftime(_) => {}
+            ClipEffect::Lofi(model) if model < 3 => {
+                self.raw[80..82].copy_from_slice(&Self::EFFECT_MAGIC);
+                self.raw[82] = 0x10 + model;
+                self.raw[83] = 0;
+            }
+            ClipEffect::Halftime(_) | ClipEffect::Lofi(_) => {}
         }
     }
 
