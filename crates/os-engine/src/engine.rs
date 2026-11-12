@@ -2618,6 +2618,25 @@ impl Engine {
             let (c, b) = (self.late[i].channel, self.late[i].buf);
             self.late[i].buf = self.adopt(&old.channels, c, b);
         }
+        // A clip effect edit rebuilds the engine while its voice is already sounding. Keep the
+        // voice's sample position, but take the new clip-local processor from the matching
+        // trigger so menu changes are audible without waiting for a retrigger.
+        for voice in &mut self.voices {
+            let Some(origin) = voice.origin else { continue };
+            let trigger = self
+                .triggers
+                .iter()
+                .chain(&self.late)
+                .find(|trigger| trigger.origin() == origin);
+            let Some(trigger) = trigger else { continue };
+            if voice.lofi != trigger.lofi {
+                voice.lofi = trigger.lofi;
+                voice.lofi_phase = 1.0;
+                voice.lofi_hold = (0.0, 0.0);
+                voice.lofi_filter = (0.0, 0.0);
+                voice.lofi_previous = (0.0, 0.0);
+            }
+        }
         self.sounding = std::mem::take(&mut old.sounding);
         self.inst_live = std::mem::take(&mut old.inst_live);
         self.inst_midi = std::mem::take(&mut old.inst_midi);
@@ -5465,6 +5484,45 @@ mod tests {
             assert!(
                 wet_live.iter().zip(&dry_live).any(|(a, b)| (a - b).abs() > 1.0e-5),
                 "live mode {model} did not alter rendered audio"
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lofi_edit_updates_a_clip_voice_that_is_already_playing() {
+        let path = std::env::temp_dir().join(format!("os-engine-lofi-live-edit-{}.wav", std::process::id()));
+        let input: Vec<f32> = (0..48000)
+            .flat_map(|i| {
+                let t = i as f32 / 48000.0;
+                let sample = (std::f32::consts::TAU * 17000.0 * t).sin() * 0.6;
+                [sample, -sample]
+            })
+            .collect();
+        wav::write_f32_stereo(&mut std::fs::File::create(&path).unwrap(), 48000, &input).unwrap();
+
+        let mut dry = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        dry.channels[0].kind = ChannelKind::AudioClip;
+        dry.channels[0].sample_path = Some(path.to_string_lossy().into_owned());
+        for model in 0..10 {
+            let mut wet = dry.clone();
+            wet.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+
+            let mut lib = SampleLibrary::new(None);
+            let mut before_dry = Engine::new(&dry, &mut lib, 44100, PlayMode::Song);
+            let mut after_dry = Engine::new(&dry, &mut lib, 44100, PlayMode::Song);
+            let mut after_wet = Engine::new(&wet, &mut lib, 44100, PlayMode::Song);
+            before_dry.render_ticks(48, &mut Vec::new());
+            after_dry.render_ticks(48, &mut Vec::new());
+            after_wet.continue_from(&mut before_dry);
+            let mut dry_rest = Vec::new();
+            after_dry.render_ticks(48, &mut dry_rest);
+            let mut wet_rest = Vec::new();
+            after_wet.render_ticks(48, &mut wet_rest);
+            assert_eq!(dry_rest.len(), wet_rest.len());
+            assert!(
+                wet_rest.iter().zip(&dry_rest).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "changing Lo-Fi mode {model} on an active clip did not alter subsequent output"
             );
         }
         let _ = std::fs::remove_file(path);
