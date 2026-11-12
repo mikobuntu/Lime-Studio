@@ -4307,7 +4307,9 @@ impl App {
             // The rolling sampler's strip: the newest picture, and just its damage when the tape moved.
             if crate::prefs::check(&crate::prefs::ROLLING_SAMPLER) && !self.state.roll.collapsed {
                 let (heard, rate) = self.transport.rolling().heard(std::time::Instant::now());
-                if heard != self.state.roll.heard || rate != self.state.roll.rate {
+                let expected_cols = (self.state.screen.0 - crate::views::rolling::ARROW_W - 2.0).max(1.0).round() as usize;
+                let layout_changed = self.state.roll.wave.is_none() || self.state.roll.cols.len() != expected_cols;
+                if heard != self.state.roll.heard || rate != self.state.roll.rate || layout_changed {
                     crate::views::rolling::pull(self);
                     self.damage_strip();
                 }
