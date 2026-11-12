@@ -30,6 +30,8 @@ mod dropout_log;
 #[cfg(test)]
 mod checks;
 #[cfg(test)]
+mod equiv;
+#[cfg(test)]
 mod open_bench;
 mod browser;
 mod browser_index;

@@ -1527,6 +1527,8 @@ pub struct App {
     /// The running export is PATTERNS > Quick render as audio clip / Render and replace's (spec: ui/pattern-render.md):
     /// what to do with its file.
     pub(crate) pattern_render: Option<crate::pattern_render::Pending>,
+    /// The playlist's Consolidate or Export all playlist tracks, running as an export (`playlist::Render`).
+    pub(crate) playlist_render: Option<crate::playlist::Render>,
     /// `device::opens` when the hosted plugins last followed the output device's rate (`follow_device`).
     device_opens: u64,
     /// The project, tempo and Lemon Studio's own saved state (`lemon_state::saved_form`) as last opened, saved or
@@ -1756,6 +1758,7 @@ impl App {
             export: None,
             export_reveal: false,
             pattern_render: None,
+            playlist_render: None,
             device_opens: 0,
             saved: (Project::default(), 0.0, Vec::new()),
             backup: Default::default(),
@@ -1959,6 +1962,11 @@ impl App {
             return;
         }
         let p = crate::rack::play_project(&self.state);
+        self.start_export_of(job, p, song);
+    }
+
+    /// `start_export` for the project `p` (a playlist render's own clips) rather than the one being edited.
+    pub(crate) fn start_export_of(&mut self, job: crate::export::Job, p: os_model::Project, song: bool) {
         let rate = Transport::device_rate().unwrap_or(44100);
         let first = job.options.ticked().next().unwrap_or(0);
         let name = job.file(first).file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
@@ -1988,6 +1996,9 @@ impl App {
                 lemon_sampler::stream::export_finished();
                 if let Some(p) = self.pattern_render.take() {
                     return self.pattern_render_done(p, r);
+                }
+                if let Some(p) = self.playlist_render.take() {
+                    return self.playlist_render_done(p, r);
                 }
                 self.state.message = Some(match r {
                     Ok((secs, files)) => {
@@ -2042,14 +2053,23 @@ impl App {
                 }
             }
         }
+        // What the save writes into the project from the interface (below) reaches playback like any edit: the engine
+        // holds the project as it is.
+        let before = self.state.project.clone();
         self.store_builtin_states();
         let s = &mut self.state;
         s.project.tempo = Some(s.tempo);
         s.project.song_mode = Some(s.song_mode);
+        // The pattern shown is saved, so the project opens on it again with the loops the rack stores into it (event
+        // 67, spec: flp/engine-events.md).
+        s.project.current_pattern = Some(s.pattern);
         // Lock, zip, filter groups and loop lengths live in the rack UI (spec: ui/channel-rack.md, Saving).
         crate::rack::to_model(s);
         // The playlist's track height, zoom and scroll (event 242, spec: flp/events/playlist.md).
         crate::playlist::store_view(s);
+        if s.project != before {
+            s.piano.dirty = true;
+        }
         // A file Lemon Studio made before the project had a playlist has no arrangement block (FL's files always have
         // one): build it again from the model, which holds everything that file stored.
         let lacks_playlist = s.file.as_ref().and_then(|f| os_flp::project::load(f).ok()).is_some_and(|p| p.arrangements.is_empty())
@@ -3668,7 +3688,7 @@ impl App {
             PerfAct::List => {}
             PerfAct::Row(i) => {
                 let Some(key) = p.shown().get(i).map(|r| r.key) else { return };
-                let now = std::time::Instant::now();
+                let now = crate::anim::now();
                 let double = p.last_click.is_some_and(|(k, t)| k == key && now.duration_since(t).as_millis() < 400);
                 p.last_click = if double { None } else { Some((key, now)) };
                 if double {
@@ -3970,7 +3990,7 @@ impl App {
     fn tap(&mut self, t: f64) {
         let tp = &mut self.state.tapper;
         let bpm = tp.count.tap(t);
-        tp.flash_at = Some(std::time::Instant::now());
+        tp.flash_at = Some(crate::anim::now());
         tp.flash = 1.0;
         let accent = tp.count.bar().is_some_and(|(_, accent)| accent);
         #[cfg(test)]
@@ -4288,6 +4308,9 @@ impl App {
     pub fn tick(&mut self) -> bool {
         // Things the interface added get their ids before anything looks them up (`control::ids`).
         let s = &mut self.state;
+        // The rack's loops follow the pattern shown: a file holds them per pattern (spec: flp/events/patterns.md "Loop
+        // lengths").
+        crate::rack::follow_pattern(s);
         s.control.settle_tick(&mut s.project, s.piano.dirty);
         self.control_tick();
         self.plugin_tick();
@@ -4329,7 +4352,7 @@ impl App {
         self.update_tick();
         // CPU panel (spec: ui/main-window.md §13) and the Plugin performance monitor: a reading at the panel's refresh
         // rate.
-        let now = std::time::Instant::now();
+        let now = crate::anim::now();
         self.song_pos_tick(now);
         self.hold_tick(now);
         self.ease_tick(now);
@@ -4806,7 +4829,7 @@ impl App {
     /// A press on the piano roll's splitter: drags it; a double click hides / brings back the event panel (spec:
     /// ui/event-panel-splitter.md §2).
     fn piano_split_press(&mut self) {
-        let now = std::time::Instant::now();
+        let now = crate::anim::now();
         let p = &mut self.state.piano;
         let double = p.split_click.is_some_and(|t| now.duration_since(t).as_millis() < 400);
         p.split_click = if double { None } else { Some(now) };
@@ -5030,7 +5053,7 @@ impl App {
         let start = s.playlist.pos;
         let secs = s.playlist.wave(&path).map_or(0.0, |w| w.secs());
         let p = &s.project;
-        let tempo = p.tick_tempo(p.tempo.unwrap_or(140.0).max(1.0));
+        let tempo = p.tick_tempo(s.tempo.max(1.0));
         let len = (secs * tempo / 60.0 * f64::from(p.ppq.max(1))).ceil() as u32;
         let track = crate::playlist::free_track(s, 0, start, start + len.max(1));
         let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -8836,7 +8859,7 @@ impl App {
             Action::StepEdit => self.toggle_step_edit(),
             // spec: ui/main-window.md §13: a double click opens the Plugin performance monitor; one click does nothing.
             Action::CpuPanel => {
-                let now = std::time::Instant::now();
+                let now = crate::anim::now();
                 let double = self.cpu_click.is_some_and(|t| now.duration_since(t).as_millis() < 400);
                 self.cpu_click = if double { None } else { Some(now) };
                 if double {
@@ -9136,7 +9159,7 @@ impl App {
             | Action::RackFill(_) => {}
             Action::WinDrag(win) => {
                 // Double-click on the title bar toggles maximized / floating (like the max button).
-                let now = std::time::Instant::now();
+                let now = crate::anim::now();
                 let m = self.mouse;
                 let double = matches!(self.title_click, Some((w, t, p)) if w == win
                     && now.duration_since(t).as_millis() < 500
@@ -9392,7 +9415,7 @@ impl App {
     fn rack_act(&mut self, a: &Action) -> bool {
         use crate::rack as rk;
         let (shift, ctrl, alt) = (self.shift, self.ctrl, self.alt);
-        let now = std::time::Instant::now();
+        let now = crate::anim::now();
         let double = matches!(&self.rack_click, Some((p, t)) if p == a && now.duration_since(*t).as_millis() < 400);
         if matches!(a, Action::RackSelect(_) | Action::RackMixer(_)) {
             self.rack_click = if double { None } else { Some((a.clone(), now)) };
@@ -9465,6 +9488,7 @@ impl App {
             Action::RackGraph => self.state.rack.graph_open = !self.state.rack.graph_open,
             Action::RackLoopBox(i) => self.drag = Some(Drag::RackLoopLen { row: i, y0: mouse.1, v0: rk::loop_box_value(&self.state, i) }),
             Action::RackGraphArea => {
+                crate::rack::graph_step(&mut self.state);
                 self.rack_graph_at(mouse);
                 self.drag = Some(Drag::RackGraph);
             }
@@ -9502,6 +9526,7 @@ impl App {
                 return true;
             }
             Action::RackGraphArea => {
+                crate::rack::graph_step(&mut self.state);
                 self.rack_graph_at((x, y));
                 self.drag = Some(Drag::RackGraph);
                 return true;
@@ -13560,6 +13585,41 @@ mod tests {
         assert_eq!(app.rows_get(Scroll::RackY), None);
     }
 
+    /// A drag in the channel rack's graph editor is one undo step, "Graph editor change velocity" on the velocity tab;
+    /// a press that changes nothing leaves none (spec: ui/undo-steps.md; FL parity audit 2026-11-08 found it missing).
+    #[test]
+    fn a_graph_editor_drag_is_one_undo_step() {
+        let mut app = App::new(None);
+        let Ok(mut c) = Canvas::new(1920, 1080, 1.0) else { return };
+        app.state.raise(Win::ChannelRack);
+        app.state.rack.graph_open = true;
+        app.state.selected_channel = 0;
+        let ch = app.state.project.channels[0].index;
+        let n = app.state.pattern.max(1);
+        crate::patterns::pat_mut(&mut app.state, n).notes.push(os_model::Note::step(ch, 0));
+        frame(&mut app, &mut c, None);
+        let area = hit_rect(&app, &Action::RackGraphArea);
+        let x = hit_rect(&app, &Action::Step(0, 0)).cx();
+        let vel = |app: &App| app.state.project.pattern(n).map(|p| p.notes[0].velocity);
+        let (before, steps) = (vel(&app), app.state.history.done());
+        app.mouse_move(x, area.y + area.h * 0.9);
+        app.mouse_down();
+        app.mouse_move(x, area.y + area.h * 0.6);
+        app.mouse_move(x, area.y + area.h * 0.4);
+        app.mouse_up();
+        assert_ne!(vel(&app), before);
+        assert_eq!((app.state.history.done(), app.state.history.newest_done()), (steps + 1, Some("Graph editor change velocity")));
+        assert!(crate::history::undo(&mut app.state).is_some());
+        assert_eq!(vel(&app), before, "one step takes the whole drag back");
+        app.state.pattern = n + 1;
+        frame(&mut app, &mut c, None);
+        let steps = app.state.history.done();
+        app.mouse_move(x, area.y + area.h * 0.5);
+        app.mouse_down();
+        app.mouse_up();
+        assert_eq!((app.state.history.done(), vel(&app)), (steps, before), "a press in a pattern without steps changes nothing");
+    }
+
     fn hit_rect(app: &App, a: &Action) -> Rect {
         app.hits.iter().rev().find(|h| &h.action == a).map(|h| h.rect).unwrap_or_else(|| panic!("no hit for {a:?}"))
     }
@@ -17142,6 +17202,10 @@ mod tests {
         app.wheel(0.0, 1.0, true, false);
         assert_eq!(order(&app)[..5], rows([0, 2, 1, 3, 4]), "the same channel, two rows up");
         assert_eq!(app.state.rack.sel, std::collections::BTreeSet::from([1]));
+        // Each move is a "Move channel" step, as the menu's: undo puts them back.
+        assert_eq!(app.state.history.newest_done(), Some("Move channel"));
+        while crate::history::undo(&mut app.state).is_some() {}
+        assert_eq!(order(&app), b, "undone back to the start");
         frame(&mut app, &mut c, None);
         let moved = order(&app);
         let name = hit_rect(&app, &Action::ChannelSelect(4));
@@ -19533,6 +19597,34 @@ mod tests {
         }
         frame(&mut app, &mut c, None);
 
+        // Another pattern shown while a dialog previews (New pattern, the pattern selector): the pattern previewed on
+        // gets its notes back on ×, on Accept and when the preview starts again on the new pattern, as no undo step
+        // holds the preview.
+        {
+            use crate::piano_dlg::Act as DAct;
+            let pat = app.state.pattern;
+            let notes_of = |app: &App, n: u16| app.state.project.patterns.iter().find(|p| p.number == n).map(|p| p.notes.clone()).unwrap_or_default();
+            put(&mut app, &[(0, 96, 60), (96, 48, 62)]);
+            let before = notes_of(&app, pat);
+            for close in [Action::CloseWin(Win::PianoDlg), Action::PianoDlg(DAct::Accept)] {
+                key(&mut app, "u", false, true, false);
+                assert_ne!(notes_of(&app, pat), before, "previewed");
+                app.state.pattern = pat + 1;
+                app.act(close.clone());
+                assert_eq!(notes_of(&app, pat), before, "{close:?} puts back the pattern previewed on");
+                assert!(!app.state.shown(Win::PianoDlg));
+                app.state.pattern = pat;
+            }
+            key(&mut app, "u", false, true, false);
+            app.state.pattern = pat + 1;
+            app.act(Action::PianoDlg(DAct::Group));
+            assert_eq!(notes_of(&app, pat), before, "a preview on the new pattern puts the old one back");
+            app.act(Action::CloseWin(Win::PianoDlg));
+            app.state.pattern = pat;
+            assert_eq!(notes_of(&app, pat), before);
+        }
+        frame(&mut app, &mut c, None);
+
         // The toolbar's tools button opens the Tools menu.
         let r = hit_rect(&app, &Action::PianoToolsMenu);
         app.mouse_move(r.cx(), r.cy());
@@ -19990,6 +20082,72 @@ mod tests {
         let _ = std::fs::remove_file(&wav);
     }
 
+    /// Follows a playlist render (Consolidate, Export all playlist tracks) as the app's tick does, until it is done.
+    fn finish_playlist_render(app: &mut App) -> String {
+        let t0 = std::time::Instant::now();
+        while app.export.is_some() || app.playlist_render.is_some() {
+            assert!(t0.elapsed().as_secs() < 120, "the render did not finish");
+            app.export_tick();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.state.message.clone().unwrap_or_default()
+    }
+
+    /// An app whose rack has a hosted plugin channel (Lemon Trio) playing a note in pattern 1, which one playlist clip
+    /// on track 0 plays.
+    fn plugin_clip_app() -> (App, u32) {
+        use os_model::{Clip, ClipSource};
+        let mut app = App::new(None);
+        app.plugins = crate::plugins::Plugins::default();
+        app.plugins.available = crate::plugins::builtin();
+        // The export renders at the output device's rate; hosted plugins run at it.
+        app.plugins.set_rate(Transport::device_rate().unwrap_or(44100));
+        app.state.project = test_project();
+        let row = add_plugin_channel(&mut app.state.project, crate::osc3::LEMON_TRIO);
+        let index = app.plugins.index_of(crate::osc3::LEMON_TRIO).unwrap();
+        app.plugins.create(row, index).unwrap();
+        app.state.hosted_rows.push(row);
+        app.transport.set_instruments(app.plugins.instruments());
+        let ppq = u32::from(app.state.project.ppq);
+        let ch = app.state.project.channels[row].index;
+        app.state.project.patterns[0].notes = vec![os_model::Note { length: ppq, ..os_model::Note::step(ch, 0) }];
+        crate::playlist::arr_mut(&mut app.state).clips = vec![Clip::new(0, 4 * ppq, 0, ClipSource::Pattern(1))];
+        app.state.path = Some(std::env::temp_dir().join(format!("os-plugin-render-{}.flp", std::process::id())));
+        (app, ppq)
+    }
+
+    /// Export all playlist tracks and Consolidate play hosted plugins: a plugin channel's track is not silent in its
+    /// file, and Consolidate's new clip carries the plugin's sound (it used to render with a bare engine).
+    #[test]
+    fn playlist_renders_play_hosted_plugins() {
+        use crate::playlist as pl;
+        let loud = |s: &os_engine::sample::Sample| s.left.iter().any(|v| v.abs() > 0.01);
+        let (mut app, ppq) = plugin_clip_app();
+        // The old render: an engine with no hosted instruments leaves the plugin channel silent.
+        let mut bare = os_engine::Engine::new(&crate::rack::play_project(&app.state), &mut os_engine::SampleLibrary::default(), 44100, PlayMode::Song);
+        assert!(bare.render_all(512).iter().all(|v| v.abs() < 1e-6), "a bare engine is silent for a plugin channel");
+        pl::run(&mut app, pl::Cmd::ExportTracks).unwrap();
+        let m = finish_playlist_render(&mut app);
+        let dir = std::env::temp_dir().join("Rendered").join(format!("os-plugin-render-{} tracks", std::process::id()));
+        assert!(m.starts_with("Exported 1 track"), "{m}");
+        let t1 = os_engine::sample::load(&dir.join("01 Track 1.wav")).expect("track file");
+        assert!(loud(&t1), "the plugin channel's track is not silent");
+        let _ = std::fs::remove_dir_all(&dir);
+        // Consolidate: the clip is muted, a new audio clip carries the sound.
+        app.state.playlist.sel = vec![0];
+        pl::run(&mut app, pl::Cmd::Consolidate).unwrap();
+        let m = finish_playlist_render(&mut app);
+        assert!(m.starts_with("Consolidated to"), "{m}");
+        let clips = pl::clips(&app.state).to_vec();
+        assert_eq!(clips.len(), 2);
+        assert!(clips[0].muted && !clips[1].muted, "source muted, render audible");
+        assert_eq!(clips[1].length, 4 * ppq);
+        let path = m.trim_start_matches("Consolidated to ").to_string();
+        let r = os_engine::sample::load(std::path::Path::new(&path)).expect("render file");
+        assert!(loud(&r), "the consolidated file is not silent");
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// Tools menu (spec: ui/playlist.md §10): quick quantize moves clip starts onto the snap grid (one undo step);
     /// export renders every playing track to its own file, all as long as the song.
     #[test]
@@ -20014,7 +20172,8 @@ mod tests {
         assert_eq!(pl::clips(&app.state)[0].position, step + 5, "one undo step");
         // Export: two files (tracks 1 and 3), the same length, each with sound only where its clip is.
         app.state.path = Some(std::env::temp_dir().join(format!("os-export-{}.flp", std::process::id())));
-        let m = pl::run(&mut app, pl::Cmd::ExportTracks).unwrap();
+        pl::run(&mut app, pl::Cmd::ExportTracks).unwrap();
+        let m = finish_playlist_render(&mut app);
         let dir = std::env::temp_dir().join("Rendered").join(format!("os-export-{} tracks", std::process::id()));
         assert!(m.starts_with("Exported 2 tracks"), "{m}");
         let read = |name: &str| os_engine::sample::load(&dir.join(name)).expect(name);
