@@ -83,6 +83,10 @@ struct Trigger {
     channel: usize,
     /// Key rate; the voice plays at the channel's current base rate times this.
     rate: f64,
+    /// Clip-local playback speed. Native sample voices multiply their step by this; hosted samplers receive it as pitch.
+    speed: f64,
+    /// Generic vintage sampler profile applied to native sample voices.
+    lofi: Option<u8>,
     /// Tick at which the voice is cut (end of an audio clip), if any.
     cut: Option<u64>,
     /// Velocity gain and note pan (âˆ’1..=1); the channel's volume and pan apply while it plays.
@@ -133,6 +137,11 @@ impl Trigger {
     fn origin(&self) -> Origin {
         (self.via.map_or(self.channel, |w| w.layer), self.key, self.swing.map_or(self.at, |s| s.base))
     }
+}
+
+/// Resampling at a slower speed lowers pitch by the corresponding number of semitones.
+fn speed_pitch_semitones(speed: f64) -> f32 {
+    (12.0 * speed.max(f64::MIN_POSITIVE).log2()) as f32
 }
 
 /// What a note the main swing can move needs to be placed again when the swing changes while the song plays
@@ -265,7 +274,13 @@ impl InstTuning {
 struct InstClip {
     channel: usize,
     voice: u32,
+    origin: Origin,
     shape: ClipShape,
+    lofi: Option<u8>,
+    lofi_phase: f64,
+    lofi_hold: (f32, f32),
+    lofi_filter: (f32, f32),
+    lofi_previous: (f32, f32),
     age: u64,
     sent: Option<f32>,
 }
@@ -708,6 +723,12 @@ struct Voice {
     off: Option<u64>,
     /// An audio clip's fades and gain.
     shape: Option<ClipShape>,
+    /// Generic vintage sampler profile.
+    lofi: Option<u8>,
+    lofi_phase: f64,
+    lofi_hold: (f32, f32),
+    lofi_filter: (f32, f32),
+    lofi_previous: (f32, f32),
     /// The channel buffer it plays (`Trigger::buf`).
     buf: u16,
     /// Its note's key, and where slide notes have moved it.
@@ -1551,6 +1572,8 @@ impl Engine {
                     channel: n.channel,
                     // The note's fine pitch is the voice's pitch offset, kept apart from its key (spec: audio/voice-levels.md).
                     rate: laws::playback_rate(n.key, laws::fine_pitch_cents(n.fine)),
+                    speed: n.speed,
+                    lofi: n.lofi,
                     fine: laws::fine_pitch_cents(n.fine) as f32 / 100.0,
                     cut: n.cut,
                     // A playlist audio clip's voice has its own volume in place of a velocity: unity through a channel at
@@ -2207,6 +2230,11 @@ impl Engine {
             age: 0,
             off: None,
             shape: None,
+            lofi: None,
+            lofi_phase: 1.0,
+            lofi_hold: (0.0, 0.0),
+            lofi_filter: (0.0, 0.0),
+            lofi_previous: (0.0, 0.0),
             buf,
             key,
             slide: VoiceSlide::new(step, velocity, pan),
@@ -2388,7 +2416,7 @@ impl Engine {
                 let ch = self.channels.get(t.channel)?;
                 let frames = ch.frames(t.buf)? as f64;
                 let since = at - frame(t.tick);
-                let from = t.from + since as f64 * t.rate * ch.base_rate;
+                let from = t.from + since as f64 * t.rate * t.speed * ch.base_rate;
                 let total = t.cut.map_or(u64::MAX, |c| frame(c) - frame(t.tick));
                 let plain = ClipShape { since: 0, total, fade_in: 0, fade_out: 0, tension_in: 0.0, tension_out: 0.0, gain: 1.0, declick: 0 };
                 let declick = (LATE_START_SECONDS * f64::from(self.rate)).round() as u64;
@@ -2596,6 +2624,25 @@ impl Engine {
             let (c, b) = (self.late[i].channel, self.late[i].buf);
             self.late[i].buf = self.adopt(&old.channels, c, b);
         }
+        // A clip effect edit rebuilds the engine while its voice is already sounding. Keep the
+        // voice's sample position, but take the new clip-local processor from the matching
+        // trigger so menu changes are audible without waiting for a retrigger.
+        for voice in &mut self.voices {
+            let Some(origin) = voice.origin else { continue };
+            let trigger = self
+                .triggers
+                .iter()
+                .chain(&self.late)
+                .find(|trigger| trigger.origin() == origin);
+            let Some(trigger) = trigger else { continue };
+            if voice.lofi != trigger.lofi {
+                voice.lofi = trigger.lofi;
+                voice.lofi_phase = 1.0;
+                voice.lofi_hold = (0.0, 0.0);
+                voice.lofi_filter = (0.0, 0.0);
+                voice.lofi_previous = (0.0, 0.0);
+            }
+        }
         self.sounding = std::mem::take(&mut old.sounding);
         self.inst_live = std::mem::take(&mut old.inst_live);
         self.inst_midi = std::mem::take(&mut old.inst_midi);
@@ -2621,6 +2668,21 @@ impl Engine {
         self.inst_offs.retain(|o| o.1 < n);
         self.inst_shapes = std::mem::take(&mut old.inst_shapes);
         self.inst_shapes.retain(|s| s.channel < n);
+        for clip in &mut self.inst_shapes {
+            let trigger = self
+                .triggers
+                .iter()
+                .chain(&self.late)
+                .find(|trigger| trigger.origin() == clip.origin);
+            let Some(trigger) = trigger else { continue };
+            if clip.lofi != trigger.lofi {
+                clip.lofi = trigger.lofi;
+                clip.lofi_phase = 1.0;
+                clip.lofi_hold = (0.0, 0.0);
+                clip.lofi_filter = (0.0, 0.0);
+                clip.lofi_previous = (0.0, 0.0);
+            }
+        }
         // An edit while the song plays (spec: audio/transport.md "Edits while playing"): an audio clip still sounding
         // from a clip the new project no longer has where it was (deleted or moved) ends now, faded out as a live note
         // is; a hosted instrument's note or audio clip that the new project no longer has gets its note off or its
@@ -3568,7 +3630,7 @@ impl Engine {
                     vel: f32::from(t.velocity) / 128.0,
                     start: t.start,
                     end: t.stop,
-                    fine: t.fine,
+                    fine: t.fine + speed_pitch_semitones(t.speed),
                     long: t.end.is_some(),
                     glide: 0,
                     levels: t.levels,
@@ -3579,7 +3641,19 @@ impl Engine {
                     colour: t.colour,
                 });
                 if let (Some(shape), Some(voice)) = (t.shape, voice) {
-                    self.inst_shapes.push(InstClip { channel: t.channel, voice, shape, age: 0, sent: None });
+                    self.inst_shapes.push(InstClip {
+                        channel: t.channel,
+                        voice,
+                        origin: t.origin(),
+                        shape,
+                        lofi: t.lofi,
+                        lofi_phase: 1.0,
+                        lofi_hold: (0.0, 0.0),
+                        lofi_filter: (0.0, 0.0),
+                        lofi_previous: (0.0, 0.0),
+                        age: 0,
+                        sent: None,
+                    });
                 }
                 // An audio clip ends at its cut (spec: plugins/lemon-sampler.md Â§7), or by itself at its end frame
                 // on an instrument that ends it there (spec: audio/audio-clips.md "What a clip plays"): that one is
@@ -3588,7 +3662,7 @@ impl Engine {
                 let inst = self.channels[t.channel].instrument.0.as_ref();
                 let ends = t.stop > 0.0 && inst.and_then(|i| i.lock().ok()).is_some_and(|i| i.voice_ends());
                 match t.cut {
-                    Some(_) if ends => {
+                    Some(_) if ends && t.speed >= 1.0 => {
                         let song = !self.looping && !self.live_only && self.end_tick > t.tick;
                         self.inst_offs.push((if song { self.end_tick } else { u64::MAX }, t.channel, k, voice, Some(t.origin())));
                     }
@@ -3609,7 +3683,7 @@ impl Engine {
         self.voices.push(Voice {
             channel: t.channel,
             pos: t.from,
-            step: t.rate,
+            step: t.rate * t.speed,
             cut: t.cut,
             release_at: t.end,
             vel: t.vel,
@@ -3624,9 +3698,14 @@ impl Engine {
             age: 0,
             off: None,
             shape: t.shape,
+            lofi: t.lofi,
+            lofi_phase: 1.0,
+            lofi_hold: (0.0, 0.0),
+            lofi_filter: (0.0, 0.0),
+            lofi_previous: (0.0, 0.0),
             buf: t.buf,
             key: t.key,
-            slide: VoiceSlide::new(t.rate, t.velocity, t.pan),
+            slide: VoiceSlide::new(t.rate * t.speed, t.velocity, t.pan),
             colour: t.colour,
             via: t.via,
             origin: Some(t.origin()),
@@ -4031,6 +4110,88 @@ impl Engine {
 /// Resampling window half-width in source samples.
 const SINC_W: f64 = 13.5;
 
+#[derive(Clone, Copy)]
+struct LofiProfile {
+    clock: f64,
+    bits: u8,
+    mono: bool,
+    filter: bool,
+    adaptive: bool,
+    mfx: bool,
+    depth: f32,
+}
+
+fn lofi_profile(model: u8) -> Option<LofiProfile> {
+    match model {
+        0 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: false, adaptive: false, mfx: false, depth: 1.0 }),
+        1 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: false, adaptive: false, mfx: true, depth: 0.5 }),
+        2 => Some(LofiProfile { clock: 7812.5, bits: 8, mono: false, filter: false, adaptive: true, mfx: false, depth: 1.0 }),
+        3 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: true, adaptive: false, mfx: false, depth: 1.0 }),
+        4 => Some(LofiProfile { clock: 44100.0, bits: 16, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.0 }),
+        5 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.5 }),
+        6 => Some(LofiProfile { clock: 11025.0, bits: 8, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.5 }),
+        7 => Some(LofiProfile { clock: 31250.0, bits: 16, mono: false, filter: true, adaptive: true, mfx: false, depth: 0.45 }),
+        8 => Some(LofiProfile { clock: 15625.0, bits: 12, mono: false, filter: false, adaptive: true, mfx: false, depth: 0.75 }),
+        9 => Some(LofiProfile { clock: 7812.5, bits: 4, mono: false, filter: false, adaptive: true, mfx: false, depth: 1.0 }),
+        _ => None,
+    }
+}
+
+fn lofi_quantize(value: f32, bits: u8) -> f32 {
+    let levels = ((1u32 << bits.min(24)) - 1) as f32;
+    (((value.clamp(-1.0, 1.0) * 0.5 + 0.5) * levels).round() / levels * 2.0 - 1.0).clamp(-1.0, 1.0)
+}
+
+fn lofi_adaptive(value: f32, previous: f32, depth: f32) -> f32 {
+    let delta = value - previous;
+    let scale = value.abs().max(previous.abs()).max(1.0e-3);
+    let step = (scale * depth / 8.0).max(1.0e-5);
+    previous + (delta / step).round().clamp(-8.0, 7.0) * step
+}
+
+fn lofi_quantized(profile: LofiProfile, mut l: f32, mut r: f32, previous: (f32, f32)) -> (f32, f32) {
+    if profile.mono {
+        l = (l + r) * 0.5;
+        r = l;
+    }
+    if profile.adaptive {
+        (
+            lofi_adaptive(l, previous.0, profile.depth),
+            lofi_adaptive(r, previous.1, profile.depth),
+        )
+    } else {
+        let bits = if profile.mfx {
+            (16.0 - 8.0 * profile.depth).round().clamp(8.0, 16.0) as u8
+        } else {
+            profile.bits
+        };
+        (lofi_quantize(l, bits), lofi_quantize(r, bits))
+    }
+}
+
+fn apply_lofi_block(clip: &mut InstClip, rate: u32, left: &mut [f32], right: &mut [f32]) {
+    let Some(model) = clip.lofi else { return };
+    let Some(profile) = lofi_profile(model) else { return };
+    let frame_s = 1.0 / f64::from(rate);
+    for (l, r) in left.iter_mut().zip(right) {
+        clip.lofi_phase += profile.clock * frame_s;
+        if clip.lofi_phase >= 1.0 {
+            clip.lofi_phase -= clip.lofi_phase.floor();
+            let (mut input_l, mut input_r) = (*l, *r);
+            if profile.filter {
+                let alpha = (profile.clock * frame_s).clamp(0.05, 0.95) as f32;
+                clip.lofi_filter.0 += alpha * (input_l - clip.lofi_filter.0);
+                clip.lofi_filter.1 += alpha * (input_r - clip.lofi_filter.1);
+                input_l = clip.lofi_filter.0;
+                input_r = clip.lofi_filter.1;
+            }
+            clip.lofi_hold = lofi_quantized(profile, input_l, input_r, clip.lofi_previous);
+            clip.lofi_previous = clip.lofi_hold;
+        }
+        (*l, *r) = clip.lofi_hold;
+    }
+}
+
 /// Adds one voice into its channel's insert bus for block frames `offset..end`.
 /// Returns false when the voice has finished.
 ///
@@ -4117,7 +4278,7 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
                 *left as f32 / *len as f32
             }
         };
-        let (l, r) = if exact {
+        let (mut l, mut r) = if exact {
             let i = pos as usize;
             (s.left[i], s.right[i])
         } else if w <= 1.0 {
@@ -4137,6 +4298,25 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
             }
             (l as f32, r as f32)
         };
+        if let Some(model) = v.lofi {
+            if let Some(profile) = lofi_profile(model) {
+                v.lofi_phase += profile.clock * ch.frame_s;
+                if v.lofi_phase >= 1.0 {
+                    v.lofi_phase -= v.lofi_phase.floor();
+                    if profile.filter {
+                        let alpha = (profile.clock * ch.frame_s).clamp(0.05, 0.95) as f32;
+                        v.lofi_filter.0 += alpha * (l - v.lofi_filter.0);
+                        v.lofi_filter.1 += alpha * (r - v.lofi_filter.1);
+                        l = v.lofi_filter.0;
+                        r = v.lofi_filter.1;
+                    }
+                    let (ql, qr) = lofi_quantized(profile, l, r, v.lofi_previous);
+                    v.lofi_hold = (ql, qr);
+                    v.lofi_previous = v.lofi_hold;
+                }
+                (l, r) = v.lofi_hold;
+            }
+        }
         if let Some(r) = glide {
             // The volume parameter glides linearly and the volume law applies to it; the pan glides linearly
             // in the left / right gains (spec: audio/pattern-controls.md).
@@ -4511,6 +4691,14 @@ fn instrument_job(cx: &InstCx, lane: InstLane, sc: &mut multicore::MixScratch) {
     let (l, r) = (&mut sc.l[..n], &mut sc.r[..n]);
     inst.process(cx.rate, l, r);
     out.delay = inst.reported_delay();
+    // Hosted sampler clips render through the instrument, so apply their clip-local Lo-Fi
+    // processor to the live output as well as native voices.
+    for clip in shapes() {
+        if clip.lofi.is_some() && clip.shape.since + clip.age < clip.shape.total {
+            apply_lofi_block(clip, cx.rate, l, r);
+            break;
+        }
+    }
     // An instrument without voice gains: the clips' shapes on its whole output. A clip that has ended keeps the channel
     // silent through its choke's tail only while no other clip of the channel plays; then the playing clips' gains
     // alone count. Clips that overlap still share one gain, so a crossfade between them dips.
@@ -4902,6 +5090,10 @@ struct Sched {
     cut: Option<u64>,
     /// Note length in ticks (0 = a step: it has no end of its own).
     len: u64,
+    /// Clip-local playback speed; resampling changes pitch together with duration.
+    speed: f64,
+    /// Generic vintage sampler profile applied to native sample voices.
+    lofi: Option<u8>,
     /// Seconds into the sample where the voice starts (audio clip window start).
     from_s: f64,
     /// Seconds into the sample where an audio clip's window ends (`None`: the sample's end).
@@ -4931,6 +5123,8 @@ impl Sched {
             mod_y: n.mod_y,
             cut: None,
             len: u64::from(n.length),
+            speed: 1.0,
+            lofi: None,
             from_s: 0.0,
             to_s: None,
             clip: None,
@@ -5248,6 +5442,12 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
             let fades = os_model::crossfade::playing(project, clips, project.tempo.unwrap_or(140.0));
             for (c, &fx) in clips.iter().zip(&fades) {
                 let start = u64::from(c.position);
+                let effect = c.effect();
+                let speed = effect.speed();
+                let lofi = match effect {
+                    os_model::ClipEffect::Lofi(model) => Some(model),
+                    _ => None,
+                };
                 let len = u64::from(c.length);
                 if !c.muted {
                     end = end.max(start + len);
@@ -5266,7 +5466,10 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
                         Some(ChannelKind::AudioClip | ChannelKind::Sampler) => {
                             let from_s = c.window.map_or(0.0, |w| w.0.max(0.0) / 1000.0);
                             let to_s = c.window.filter(|w| w.0 >= 0.0 && w.1 >= 0.0).map(|w| w.1 / 1000.0);
-                            out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, from_s, to_s, clip: ClipFx::of(c, fx), slide: false, colour: 0, porta: false, swing: None });
+                            let clip = ClipFx::of(c, fx).or_else(|| {
+                                lofi.map(|_| ClipFx { fade_in: (0.0, 0.0), fade_out: (0.0, 0.0), gain: 1.0 })
+                            });
+                            out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, speed, lofi, from_s, to_s, clip, slide: false, colour: 0, porta: false, swing: None });
                         }
                         Some(ChannelKind::Automation) => {}
                         _ => report.automation_clips_ignored += 1,
@@ -5281,8 +5484,166 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
 #[cfg(test)]
 mod tests {
     // spec: audio/pattern-controls.md (note repeat and channel control points, measured in FL)
+    use crate::wav;
     use super::*;
-    use os_model::{Channel, Note, Pattern};
+    use os_model::{Channel, ClipSource, Note, Pattern};
+
+    #[test]
+    fn clip_speed_maps_to_native_rate_and_sampler_pitch() {
+        assert_eq!(speed_pitch_semitones(1.0), 0.0);
+        assert!((speed_pitch_semitones(0.5) + 12.0).abs() < 1e-6);
+        assert!((speed_pitch_semitones(0.25) + 24.0).abs() < 1e-6);
+        assert!((speed_pitch_semitones(0.125) + 36.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lofi_profiles_have_distinct_clock_and_quantizer_settings() {
+        for model in 0..10 {
+            assert!(lofi_profile(model).is_some(), "missing Lo-Fi mode {model}");
+        }
+        let sp = lofi_profile(0).expect("SP-1200 profile");
+        assert_eq!((sp.clock, sp.bits, sp.mono, sp.filter), (26040.0, 12, true, false));
+        let p6 = lofi_profile(4).expect("P-6 profile");
+        assert_eq!((p6.clock, p6.bits, p6.mono, p6.filter, p6.mfx, p6.depth), (44100.0, 16, false, true, true, 0.0));
+        let p6_low = lofi_profile(6).expect("P-6 11.025 kHz profile");
+        assert_eq!((p6_low.clock, p6_low.filter, p6_low.mfx, p6_low.depth), (11025.0, true, true, 0.5));
+        let sp202 = lofi_profile(9).expect("SP-202 adaptive profile");
+        assert_eq!((sp202.clock, sp202.bits, sp202.adaptive), (7812.5, 4, true));
+        assert!(lofi_profile(10).is_none());
+        assert!(lofi_quantize(0.1234, 8) != 0.1234);
+        assert!(lofi_adaptive(0.7, 0.0, 1.0).abs() > 0.0);
+        for model in 0..10 {
+            let profile = lofi_profile(model).unwrap();
+            let out = lofi_quantized(profile, 0.73123, -0.41789, (0.0, 0.0));
+            assert!(out != (0.73123, -0.41789), "mode {model} did not process audio");
+        }
+    }
+
+    #[test]
+    fn lofi_clip_render_differs_from_bypass_for_every_mode() {
+        let path = std::env::temp_dir().join(format!("os-engine-lofi-{}.wav", std::process::id()));
+        let input: Vec<f32> = (0..48000)
+            .flat_map(|i| {
+                let t = i as f32 / 48000.0;
+                let transient = if i < 128 { 0.8 * (1.0 - t * 48000.0 / 128.0) } else { 0.0 };
+                let high = (std::f32::consts::TAU * 17000.0 * t).sin() * 0.35;
+                [transient + high, transient - high]
+            })
+            .collect();
+        wav::write_f32_stereo(&mut std::fs::File::create(&path).unwrap(), 48000, &input).unwrap();
+        let mut baseline = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        baseline.channels[0].kind = ChannelKind::AudioClip;
+        baseline.channels[0].sample_path = Some(path.to_string_lossy().into_owned());
+        let dry = render_song(&baseline);
+        assert!(dry.iter().any(|sample| sample.abs() > 1.0e-4));
+        for model in 0..10 {
+            baseline.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+            let wet = render_song(&baseline);
+            assert_eq!(wet.len(), dry.len(), "mode {model} changed clip duration");
+            assert!(
+                wet.iter().zip(&dry).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "mode {model} did not alter rendered audio"
+            );
+        }
+        baseline.arrangements[0].clips[0].set_effect(os_model::ClipEffect::None);
+        let dry_live = process_song(&baseline);
+        for model in 0..10 {
+            baseline.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+            let wet_live = process_song(&baseline);
+            assert!(
+                wet_live.iter().zip(&dry_live).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "live mode {model} did not alter rendered audio"
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lofi_edit_updates_a_clip_voice_that_is_already_playing() {
+        let path = std::env::temp_dir().join(format!("os-engine-lofi-live-edit-{}.wav", std::process::id()));
+        let input: Vec<f32> = (0..48000)
+            .flat_map(|i| {
+                let t = i as f32 / 48000.0;
+                let sample = (std::f32::consts::TAU * 17000.0 * t).sin() * 0.6;
+                [sample, -sample]
+            })
+            .collect();
+        wav::write_f32_stereo(&mut std::fs::File::create(&path).unwrap(), 48000, &input).unwrap();
+
+        let mut dry = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        dry.channels[0].kind = ChannelKind::AudioClip;
+        dry.channels[0].sample_path = Some(path.to_string_lossy().into_owned());
+        for model in 0..10 {
+            let mut wet = dry.clone();
+            wet.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+
+            let mut lib = SampleLibrary::new(None);
+            let mut before_dry = Engine::new(&dry, &mut lib, 44100, PlayMode::Song);
+            let mut after_dry = Engine::new(&dry, &mut lib, 44100, PlayMode::Song);
+            let mut after_wet = Engine::new(&wet, &mut lib, 44100, PlayMode::Song);
+            before_dry.render_ticks(48, &mut Vec::new());
+            after_dry.render_ticks(48, &mut Vec::new());
+            after_wet.continue_from(&mut before_dry);
+            let mut dry_rest = Vec::new();
+            after_dry.render_ticks(48, &mut dry_rest);
+            let mut wet_rest = Vec::new();
+            after_wet.render_ticks(48, &mut wet_rest);
+            assert_eq!(dry_rest.len(), wet_rest.len());
+            assert!(
+                wet_rest.iter().zip(&dry_rest).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "changing Lo-Fi mode {model} on an active clip did not alter subsequent output"
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lofi_edit_updates_a_hosted_clip_voice_that_is_already_playing() {
+        struct Tone(u32);
+        impl crate::Instrument for Tone {
+            fn note_on(&mut self, _offset: u32, _key: u8, _velocity: f32) {}
+            fn note_off(&mut self, _offset: u32, _key: u8) {}
+            fn process(&mut self, _rate: u32, left: &mut [f32], right: &mut [f32]) {
+                for (i, (l, r)) in left.iter_mut().zip(right).enumerate() {
+                    let value = if (self.0 + i as u32) % 2 == 0 { 0.7 } else { -0.7 };
+                    *l = value;
+                    *r = -value;
+                }
+                self.0 += left.len() as u32;
+            }
+        }
+
+        let path = std::env::temp_dir().join(format!("os-engine-lofi-hosted-live-edit-{}.wav", std::process::id()));
+        wav::write_f32_stereo(&mut std::fs::File::create(&path).unwrap(), 48000, &vec![0.25; 96000]).unwrap();
+        let mut dry = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        dry.channels[0].kind = ChannelKind::AudioClip;
+        dry.channels[0].sample_path = Some(path.to_string_lossy().into_owned());
+
+        for model in 0..10 {
+            let mut wet = dry.clone();
+            wet.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+            let make = |project: &Project| {
+                let mut lib = SampleLibrary::new(None);
+                let instrument: SharedInstrument = Arc::new(std::sync::Mutex::new(Tone(0)));
+                Engine::with_instruments(project, &mut lib, 44100, PlayMode::Song, &[(0, instrument)])
+            };
+            let mut before_dry = make(&dry);
+            let mut after_dry = make(&dry);
+            let mut after_wet = make(&wet);
+            before_dry.render_ticks(48, &mut Vec::new());
+            after_dry.render_ticks(48, &mut Vec::new());
+            after_wet.continue_from(&mut before_dry);
+            let mut dry_rest = Vec::new();
+            after_dry.render_ticks(48, &mut dry_rest);
+            let mut wet_rest = Vec::new();
+            after_wet.render_ticks(48, &mut wet_rest);
+            assert!(
+                wet_rest.iter().zip(&dry_rest).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "changing hosted Lo-Fi mode {model} on an active clip did not alter subsequent output"
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
 
     fn channel() -> Channel {
         Channel {
@@ -6090,6 +6451,19 @@ mod tests {
         Engine::new(p, &mut lib, 44100, PlayMode::Pattern(1)).render_all(512)
     }
 
+    fn render_song(p: &Project) -> Vec<f32> {
+        let mut lib = SampleLibrary::new(None);
+        Engine::new(p, &mut lib, 44100, PlayMode::Song).render_all(512)
+    }
+
+    fn process_song(p: &Project) -> Vec<f32> {
+        let mut lib = SampleLibrary::new(None);
+        let mut engine = Engine::new(p, &mut lib, 44100, PlayMode::Song);
+        let mut out = vec![0.0; 8192];
+        engine.process(&mut out);
+        out
+    }
+
     fn peak(x: &[f32], ch: usize) -> f32 {
         x.chunks_exact(2).map(|f| f[ch].abs()).fold(0.0, f32::max)
     }
@@ -6283,6 +6657,16 @@ mod tests {
             ..Default::default()
         }];
         p
+    }
+
+    #[test]
+    fn slowed_audio_clip_still_cuts_at_timeline_end() {
+        let mut p = song(vec![], vec![os_model::Clip::new(0, 384, 0, ClipSource::Channel(0))]);
+        p.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Halftime(2));
+
+        let (scheduled, end) = schedule(&p, PlayMode::Song, &mut EngineReport::default());
+        let clip = scheduled.iter().find(|s| s.cut.is_some()).expect("audio clip trigger");
+        assert_eq!((clip.len, clip.cut, end), (384, Some(384), 384));
     }
 
     /// A pattern's bars are its own (spec: audio/song-structure.md, "Time signatures and a pattern's length"): the

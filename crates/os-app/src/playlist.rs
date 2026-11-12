@@ -306,11 +306,15 @@ pub enum Cmd {
     ClipUnique(usize),
     /// An audio clip as heard (trims, fades, gain, the channel's settings) rendered to a new sample, which it then plays.
     ClipUniqueSample(usize),
+    /// An audio clip rendered in place, clearing clip-local processing from the replacement.
+    ClipBounce(usize),
+    ClipLofi(usize, u8),
     ClipEditSource(usize),
     ClipSelectSimilar(usize),
     ClipRename(usize),
     ClipRandomColor(usize),
     ClipPreview(usize),
+    ClipHalftime(usize, u8),
     /// A picker item's menu (§10a) on an audio or automation clip source: the command and the source's channel index.
     Pick(PickCmd, u16),
     PointDelete(u16, usize),
@@ -2427,6 +2431,7 @@ pub fn make_unique_sample(s: &mut State, i: usize) -> String {
     if let Some(cl) = arr_mut(s).clips.get_mut(i) {
         cl.source = ClipSource::Channel(index);
         cl.window = None;
+        cl.set_effect(os_model::ClipEffect::None);
         cl.set_gain(1.0);
         cl.set_fade_in(None);
         cl.set_fade_out(None);
@@ -2436,6 +2441,20 @@ pub fn make_unique_sample(s: &mut State, i: usize) -> String {
     s.playlist.source = Some(ClipSource::Channel(index));
     s.piano.dirty = true;
     format!("Made unique as sample: {}", file.display())
+}
+
+/// Render an audio clip in place, rejecting inputs that cannot be decoded instead of silently rendering a fallback.
+fn bounce_in_place(s: &mut State, i: usize) -> String {
+    let Some(c) = clips(s).get(i).copied() else { return "Bounce in place: no clip".into() };
+    let ClipSource::Channel(ch) = c.source else { return "Bounce in place: not an audio clip".into() };
+    let Some(channel) = s.project.channels.iter().find(|x| x.index == ch) else { return "Bounce in place: the clip's channel is gone".into() };
+    let Some(path) = channel.sample_path.clone().filter(|p| !p.trim().is_empty()) else {
+        return "Bounce in place: the audio source is missing".into();
+    };
+    if s.playlist.wave(&path).is_none() {
+        return "Bounce in place: the audio source cannot be decoded".into();
+    }
+    make_unique_sample(s, i).replace("Make unique as sample", "Bounce in place").replace("Made unique as sample", "Bounced in place")
 }
 
 /// First track at or below `from` with no clips overlapping `[a, b)`.
@@ -3033,6 +3052,50 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
             items.push(PItem::new("Make unique", Cmd::ClipUnique(i)));
         }
         PickKind::Audio => {
+            items.extend([
+                PItem::head("Clip effects"),
+                PItem::new("Bounce in place", Cmd::ClipBounce(i)),
+                PItem::sep(),
+                PItem::sub(
+                    "Lo-Fi",
+                    vec![
+                        PItem::new("Off", Cmd::ClipLofi(i, 10)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::None)),
+                        PItem::head("SP-1200"),
+                        PItem::new("12-bit ZOH", Cmd::ClipLofi(i, 0)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(0))),
+                        PItem::new("12-bit filtered", Cmd::ClipLofi(i, 3)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(3))),
+                        PItem::head("P-6"),
+                        PItem::new("44.1 kHz stereo", Cmd::ClipLofi(i, 4)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(4))),
+                        PItem::new("22.05 kHz stereo", Cmd::ClipLofi(i, 1)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(1))),
+                        PItem::new("11.025 kHz lo-fi", Cmd::ClipLofi(i, 6)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(6))),
+                        PItem::head("SP-202"),
+                        PItem::new("31.25 kHz filtered", Cmd::ClipLofi(i, 7)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(7))),
+                        PItem::new("15.625 kHz raw", Cmd::ClipLofi(i, 8)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(8))),
+                        PItem::new("7.8125 kHz adaptive", Cmd::ClipLofi(i, 9)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::Lofi(9))),
+                    ],
+                ),
+                PItem::sep(),
+                PItem::sub(
+                    "Halftime",
+                    [1, 2, 4, 8]
+                        .into_iter()
+                        .map(|divisor| {
+                            let label = match divisor {
+                                1 => "Off",
+                                2 => "2x",
+                                4 => "4x",
+                                8 => "8x",
+                                _ => unreachable!(),
+                            };
+                            PItem::new(label, Cmd::ClipHalftime(i, divisor)).mark(Mark::Radio(match (divisor, c.effect()) {
+                                (1, os_model::ClipEffect::None) => true,
+                                (d, os_model::ClipEffect::Halftime(current)) => d == current,
+                                _ => false,
+                            }))
+                        })
+                        .collect(),
+                ),
+                PItem::sep(),
+            ]);
             items.push(PItem::new("Make unique", Cmd::ClipUnique(i)));
             items.push(PItem::new("Make unique as sample", Cmd::ClipUniqueSample(i)));
         }
@@ -5228,6 +5291,20 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
             s.piano.dirty = true;
             None
         }
+        Cmd::ClipHalftime(i, divisor) => {
+            let Some(effect) = (divisor == 1).then_some(os_model::ClipEffect::None).or_else(|| os_model::ClipEffect::halftime(divisor)) else {
+                return Some("Halftime: unsupported ratio".into());
+            };
+            if !matches!(clips(s).get(i).map(|c| (c.source, c.effect())), Some((ClipSource::Channel(ch), old)) if source_kind(s, ClipSource::Channel(ch)) == PickKind::Audio && old != effect) {
+                return None;
+            }
+            snapshot_as(s, "Clip effect");
+            if let Some(c) = arr_mut(s).clips.get_mut(i) {
+                c.set_effect(effect);
+            }
+            s.piano.dirty = true;
+            None
+        }
         Cmd::ClipDelete(i) => {
             snapshot(s);
             delete(s, vec![i]);
@@ -5239,6 +5316,19 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
             make_unique(s, i).map(|n| format!("Made unique: pattern {n}"))
         }
         Cmd::ClipUniqueSample(i) => Some(make_unique_sample(s, i)),
+        Cmd::ClipBounce(i) => Some(bounce_in_place(s, i)),
+        Cmd::ClipLofi(i, model) => {
+            let effect = if model == 10 { os_model::ClipEffect::None } else { os_model::ClipEffect::lofi(model).unwrap_or(os_model::ClipEffect::None) };
+            if !matches!(clips(s).get(i).map(|c| (c.source, c.effect())), Some((ClipSource::Channel(ch), old)) if source_kind(s, ClipSource::Channel(ch)) == PickKind::Audio && old != effect) {
+                return None;
+            }
+            snapshot_as(s, "Clip effect");
+            if let Some(c) = arr_mut(s).clips.get_mut(i) {
+                c.set_effect(effect);
+            }
+            s.piano.dirty = true;
+            None
+        }
         Cmd::ClipEditSource(i) => {
             if let Some(ClipSource::Pattern(n)) = clips(s).get(i).map(|c| c.source) {
                 s.pattern = n;

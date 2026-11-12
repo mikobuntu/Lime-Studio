@@ -1715,6 +1715,35 @@ pub enum ClipSource {
     Channel(u16),
 }
 
+/// A playlist clip's optional playback effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipEffect {
+    None,
+    /// Resample the clip at one of the generic HalfTime-style speed ratios.
+    Halftime(u8),
+    /// Apply a generic vintage sampler profile.
+    Lofi(u8),
+}
+
+impl ClipEffect {
+    /// The sample playback speed relative to the unprocessed clip.
+    pub fn speed(self) -> f64 {
+        match self {
+            Self::None => 1.0,
+            Self::Halftime(divisor) => 1.0 / f64::from(divisor.max(1)),
+            Self::Lofi(_) => 1.0,
+        }
+    }
+
+    pub fn halftime(divisor: u8) -> Option<Self> {
+        matches!(divisor, 2 | 4 | 8).then_some(Self::Halftime(divisor))
+    }
+
+    pub fn lofi(model: u8) -> Option<Self> {
+        (model < 10).then_some(Self::Lofi(model))
+    }
+}
+
 /// Length of a stored clip record (spec: flp/events/playlist.md).
 pub const CLIP_RECORD_LEN: usize = 88;
 
@@ -1736,7 +1765,42 @@ pub struct Clip {
     pub raw: [u8; CLIP_RECORD_LEN],
 }
 
+#[cfg(test)]
+mod clip_effect_tests {
+    use super::{Clip, ClipEffect, ClipSource};
+
+    #[test]
+    fn clip_effect_round_trips_in_raw_record() {
+        let mut clip = Clip::new(0, 480, 0, ClipSource::Channel(0));
+        assert_eq!(clip.effect(), ClipEffect::None);
+
+        clip.set_effect(ClipEffect::Halftime(2));
+        assert_eq!(clip.effect(), ClipEffect::Halftime(2));
+        assert_eq!(clip.effect().speed(), 0.5);
+
+        clip.set_effect(ClipEffect::None);
+        assert_eq!(clip.effect(), ClipEffect::None);
+        clip.set_effect(ClipEffect::Lofi(1));
+        assert_eq!(clip.effect(), ClipEffect::Lofi(1));
+    }
+
+    #[test]
+    fn unsupported_halftime_ratios_are_rejected() {
+        assert!(ClipEffect::halftime(2).is_some());
+        assert!(ClipEffect::halftime(4).is_some());
+        assert!(ClipEffect::halftime(8).is_some());
+        assert!(ClipEffect::halftime(1).is_none());
+        assert!(ClipEffect::halftime(3).is_none());
+        assert!(ClipEffect::lofi(0).is_some());
+        assert!(ClipEffect::lofi(2).is_some());
+        assert!(ClipEffect::lofi(9).is_some());
+        assert!(ClipEffect::lofi(10).is_none());
+    }
+}
+
 impl Clip {
+    const EFFECT_MAGIC: [u8; 2] = *b"LS";
+
     /// A new clip record as FL 26 writes one (spec: flp/events/playlist.md).
     pub const TEMPLATE: [u8; CLIP_RECORD_LEN] = {
         let mut r = [0u8; CLIP_RECORD_LEN];
@@ -1775,6 +1839,40 @@ impl Clip {
 
     pub fn end(&self) -> u32 {
         self.position + self.length
+    }
+
+    /// The optional Lemon Studio clip effect stored in the unused tail of the current clip record.
+    pub fn effect(&self) -> ClipEffect {
+        if self.raw[80..82] != Self::EFFECT_MAGIC {
+            return ClipEffect::None;
+        }
+        match self.raw[82] {
+            2 | 4 | 8 => ClipEffect::Halftime(self.raw[82]),
+            0x10..=0x19 => ClipEffect::Lofi(self.raw[82] - 0x10),
+            _ => ClipEffect::None,
+        }
+    }
+
+    /// Sets the optional clip effect. Older FL clip records do not have room for this extension and keep it absent.
+    pub fn set_effect(&mut self, effect: ClipEffect) {
+        match effect {
+            ClipEffect::None => {
+                if self.raw[80..82] == Self::EFFECT_MAGIC {
+                    self.raw[80..84].fill(0);
+                }
+            }
+            ClipEffect::Halftime(divisor) if matches!(divisor, 2 | 4 | 8) => {
+                self.raw[80..82].copy_from_slice(&Self::EFFECT_MAGIC);
+                self.raw[82] = divisor;
+                self.raw[83] = 0;
+            }
+            ClipEffect::Lofi(model) if model < 10 => {
+                self.raw[80..82].copy_from_slice(&Self::EFFECT_MAGIC);
+                self.raw[82] = 0x10 + model;
+                self.raw[83] = 0;
+            }
+            ClipEffect::Halftime(_) | ClipEffect::Lofi(_) => {}
+        }
     }
 
     /// The clip at timebase `to` instead of `from` ([`Project::set_ppq`]): position, length and, for a pattern clip,

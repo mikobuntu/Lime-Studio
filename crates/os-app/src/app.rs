@@ -20924,7 +20924,19 @@ mod tests {
         let i = pl::add_audio_clip(&mut app.state, &wav.to_string_lossy(), 1, 0).expect("audio clip added");
         let rows = app.state.project.channels.len();
         let os_model::ClipSource::Channel(ch) = pl::clips(&app.state)[i].source else { panic!("an audio clip") };
-        assert!(pl::clip_menu(&app.state, i, 0.0, 0.0).items.iter().any(|it| it.cmd == pl::Cmd::ClipUniqueSample(i)));
+        let menu = pl::clip_menu(&app.state, i, 0.0, 0.0);
+        let effects = menu.items.iter().position(|it| it.label == "Clip effects").expect("clip effects section");
+        assert_eq!(menu.items[effects + 1].cmd, pl::Cmd::ClipBounce(i));
+        assert!(menu.items.iter().any(|it| it.cmd == pl::Cmd::ClipUniqueSample(i)));
+        let lofi = menu.items.iter().find(|it| it.label == "Lo-Fi").expect("Lo-Fi submenu");
+        assert!(lofi.children.iter().any(|it| it.label == "SP-1200" && it.head));
+        assert!(lofi.children.iter().any(|it| it.cmd == pl::Cmd::ClipLofi(i, 0)));
+        assert!(lofi.children.iter().any(|it| it.cmd == pl::Cmd::ClipLofi(i, 4)));
+        assert!(lofi.children.iter().any(|it| it.cmd == pl::Cmd::ClipLofi(i, 9)));
+        pl::run(&mut app, pl::Cmd::ClipLofi(i, 4));
+        assert_eq!(pl::clips(&app.state)[i].effect(), os_model::ClipEffect::Lofi(4));
+        app.key(&winit::keyboard::Key::Character("z".into()), true, false);
+        assert_eq!(pl::clips(&app.state)[i].effect(), os_model::ClipEffect::None);
 
         pl::run(&mut app, pl::Cmd::ClipUnique(i));
         assert_eq!(app.state.project.channels.len(), rows + 1);
@@ -20935,6 +20947,16 @@ mod tests {
         app.key(&winit::keyboard::Key::Character("z".into()), true, false);
         assert_eq!(app.state.project.channels.len(), rows, "undo takes the copy away");
         assert_eq!(pl::clips(&app.state)[i].source, os_model::ClipSource::Channel(ch));
+
+        pl::arr_mut(&mut app.state).clips[i].set_effect(os_model::ClipEffect::Halftime(2));
+        let bounced = pl::run(&mut app, pl::Cmd::ClipBounce(i)).unwrap_or_default();
+        assert!(bounced.starts_with("Bounced in place"), "{bounced}");
+        let bounced_path = app.state.project.channels.last().unwrap().sample_path.clone().unwrap();
+        assert_eq!(pl::clips(&app.state)[i].effect(), os_model::ClipEffect::None);
+        app.key(&winit::keyboard::Key::Character("z".into()), true, false);
+        assert_eq!(pl::clips(&app.state)[i].source, os_model::ClipSource::Channel(ch));
+        assert_eq!(pl::clips(&app.state)[i].effect(), os_model::ClipEffect::Halftime(2));
+        let _ = std::fs::remove_file(&bounced_path);
 
         // The clip's second half at half gain.
         let len = pl::clips(&app.state)[i].length;
