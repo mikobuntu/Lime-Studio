@@ -728,6 +728,7 @@ pub fn page(tab: usize, s: &State) -> Vec<Group> {
                     combo(crate::prefs::choice(&crate::prefs::ROLLING_BUFFER), 96.0, "Rolling buffer"),
                     Check("Remove silence", crate::prefs::check(&crate::prefs::ROLLING_TRIM)),
                     Slider("Fade in/out", 0.5),
+                    combo(crate::prefs::choice(&crate::prefs::ROLLING_WAVE_MODE), 112.0, crate::prefs::ROLLING_WAVE_MODE.label),
                     combo(&wave_colour_text(), 96.0, WAVE_COLOUR),
                     Text("Keeps the newest master output in memory; a selection on the strip between the toolbar and the playlist drops onto a track as audio. Ctrl+click the strip's wave to pause the capture; the fade smooths a dragged clip's edges over that many milliseconds, from the nearest zero crossing.".into(), true),
                 ]),

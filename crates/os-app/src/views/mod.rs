@@ -91,7 +91,8 @@ pub const WORK_Y: f32 = 83.0;
 /// Top of the workspace and the browser now: the window's top while the toolbar is hidden (spec: ui/toolbar-menu.md
 /// §5), else the top band's bottom (`band_h`).
 pub fn work_y(s: &State) -> f32 {
-    if s.toolbar.hidden { 0.0 } else { band_h(s) }
+    let toolbar = if s.toolbar.hidden { 0.0 } else { band_h(s) };
+    toolbar + rolling::strip_h(s)
 }
 
 /// Display scale of the main window's top band (the toolbar rows, `WORK_Y` tall in its own px for two rows) for a

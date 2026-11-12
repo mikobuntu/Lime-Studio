@@ -7,7 +7,7 @@
 //! `App::tick` pulls the picture (`pull`), the paint draws it and registers the hits; the interactions live on
 //! `App` (`Action::Rolling`, `Drag::RollSel`).
 
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use os_ui::Rect;
 
@@ -138,7 +138,9 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
     // tape (before its oldest frame, past the newest heard) draws nothing: it is not silence, it is no tape.
     let mid = wv.y + wv.h / 2.0;
     let amp = wv.h / 2.0 - 1.0;
-    let ink = crate::prefs::rolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
+    let palette = crate::prefs::index(&crate::prefs::ROLLING_WAVE_MODE);
+    let custom = crate::prefs::rolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
+    let pulse = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f32());
     for (c, &(lo, hi)) in s.roll.cols.iter().enumerate() {
         let at = s.roll.from + (s.roll.visible as f64 * (c as f64 + 0.5) / s.roll.cols.len().max(1) as f64) as u64;
         if (lo, hi) == (0.0, 0.0) && !(s.roll.have.0..s.roll.have.1).contains(&at) {
@@ -147,7 +149,20 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         let (lo, hi) = (lo.clamp(-1.0, 1.0), hi.clamp(-1.0, 1.0));
         let y0 = mid - hi * amp;
         let y1 = mid - lo * amp;
+        let ink = if palette == 2 {
+            spectrum_color((c as f32 / s.roll.cols.len().max(1) as f32 + pulse * 0.035) % 1.0, 0.82)
+        } else if palette == 1 {
+            custom
+        } else {
+            ui.t.tx(0xb9bfc3)
+        };
         ui.c.fill_cell(Rect::new(wv.x + c as f32, y0.min(y1), 1.0, (y1 - y0).max(1.0)), ink);
+    }
+    if palette == 2 {
+        let glow = (0.28 + 0.16 * (pulse * 2.2).sin()).clamp(0.10, 0.44);
+        let glow_color = spectrum_color((pulse * 0.035) % 1.0, glow);
+        ui.c.stroke_rrect(wv.outset(1.0), 2.0, 1.0, glow_color);
+        ui.c.stroke_rrect(wv.outset(2.0), 3.0, 1.0, glow_color.with_alpha((glow_color.a / 2).max(1)));
     }
 
     // Paused (a Ctrl+click on the wave): the newest audio is not taken while it stands.
@@ -198,4 +213,33 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         "Rolling sampler — drag to select a piece of the recent output, then drag it onto a playlist track; Ctrl+click pauses"
     };
     ui.hit(wv, Action::Rolling(Act::Wave), hint);
+}
+
+fn spectrum_color(hue: f32, alpha: f32) -> os_ui::Color {
+    let h = hue.rem_euclid(1.0) * 6.0;
+    let x = 1.0 - ((h % 2.0) - 1.0).abs();
+    let (r, g, b) = match h as u32 {
+        0 => (1.0, x, 0.0),
+        1 => (x, 1.0, 0.0),
+        2 => (0.0, 1.0, x),
+        3 => (0.0, x, 1.0),
+        4 => (x, 0.0, 1.0),
+        _ => (1.0, 0.0, x),
+    };
+    os_ui::Color::rgb(((r * 255.0) as u32) << 16 | ((g * 255.0) as u32) << 8 | (b * 255.0) as u32)
+        .with_alpha((alpha * 255.0) as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spectrum_color;
+
+    #[test]
+    fn rainbow_palette_wraps_smoothly_and_preserves_alpha() {
+        let a = spectrum_color(0.0, 0.5);
+        let b = spectrum_color(1.0, 0.5);
+        assert_eq!((a.r, a.g, a.b, a.a), (b.r, b.g, b.b, b.a));
+        assert_eq!(a.a, 127);
+        assert_ne!(spectrum_color(0.0, 0.5).g, spectrum_color(0.33, 0.5).g);
+    }
 }

@@ -213,8 +213,8 @@ impl Rolling {
                 let e1 = b / PYR as u64;
                 if e1 > e0 {
                     for e in e0..e1 {
-                        let p = d.pl[(e as usize * PYR) % d.pl.len()];
-                        let q = d.pr[(e as usize * PYR) % d.pl.len()];
+                        let p = d.pl[(e as usize) % d.pl.len()];
+                        let q = d.pr[(e as usize) % d.pr.len()];
                         (lo_l, hi_l) = (lo_l.min(p.0), hi_l.max(p.1));
                         (lo_r, hi_r) = (lo_r.min(q.0), hi_r.max(q.1));
                     }
@@ -332,20 +332,26 @@ fn write_block(d: &mut Data, stereo: &[f32], w: usize, block: u64, at: Instant, 
             d.r[k] = r;
         }
     }
-    // The pyramid entries the block's frames fall in, from the ring (the summed frames included).
-    let k0 = ((d.start as usize) % cap) / PYR;
-    let k1 = ((d.start as usize + n as usize + cap - 1) % cap) / PYR;
-    let steps = if k1 >= k0 { k1 - k0 + 1 } else { d.pl.len() - k0 + k1 + 1 };
-    for s in 0..steps.min(d.pl.len()) {
-        let k = (k0 + s) % d.pl.len();
-        let (mut lo_l, mut hi_l, mut lo_r, mut hi_r) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
-        for j in 0..PYR {
-            let i = (k * PYR + j) % cap;
-            (lo_l, hi_l) = (lo_l.min(d.l[i]), hi_l.max(d.l[i]));
-            (lo_r, hi_r) = (lo_r.min(d.r[i]), hi_r.max(d.r[i]));
+    // Rebuild every touched absolute pyramid entry using only frames currently in the tape. The previous
+    // implementation scanned a full ring cell, so a partially written cell could retain overwritten samples and
+    // appear as a one-pixel spike at the next wrap.
+    let first = d.start / PYR as u64;
+    let last = (d.start + n.saturating_sub(1)) / PYR as u64;
+    let oldest = d.total.saturating_sub(cap as u64);
+    for entry in first..=last {
+        let a = (entry * PYR as u64).max(oldest);
+        let b = ((entry + 1) * PYR as u64).min(d.total);
+        let mut peaks = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for f in a..b {
+            let i = (f % cap as u64) as usize;
+            peaks.0 = peaks.0.min(d.l[i]);
+            peaks.1 = peaks.1.max(d.l[i]);
+            peaks.2 = peaks.2.min(d.r[i]);
+            peaks.3 = peaks.3.max(d.r[i]);
         }
-        d.pl[k] = (lo_l, hi_l);
-        d.pr[k] = (lo_r, hi_r);
+        let k = (entry as usize) % d.pl.len();
+        d.pl[k] = (peaks.0, peaks.1);
+        d.pr[k] = (peaks.2, peaks.3);
     }
 }
 

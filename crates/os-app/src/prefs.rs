@@ -585,6 +585,11 @@ pub const ROLLING_SAMPLER: Check = Check { key: "rolling_sampler", label: "Rolli
 pub const ROLLING_BUFFER: Combo =
     Combo { key: "rolling_buffer", label: "Rolling buffer", choices: &["30 s", "1 min", "2 min", "5 min", "10 min"], default: 2 };
 
+/// Audio ▸ Rolling sampler: the waveform palette. Custom uses `rolling_wave_color`; Rainbow spectrum animates a
+/// smooth hue sweep across the strip.
+pub const ROLLING_WAVE_MODE: Combo =
+    Combo { key: "rolling_wave_mode", label: "Wave palette", choices: &["Theme", "Custom", "Rainbow spectrum"], default: 0 };
+
 /// Audio ▸ Rolling sampler: a dragged-out clip's leading and trailing silence is cut (issue #82).
 pub const ROLLING_TRIM: Check = Check { key: "rolling_trim", label: "Remove silence", default: false };
 
@@ -687,7 +692,7 @@ pub const CHECKS: &[&Check] = &[
     &AUTO_AUDIO_CLIPS,
 ];
 /// The declared combos.
-pub const COMBOS: &[&Combo] = &[&MAIN_GUI_SCALING, &POPUPS_SCALING, &NOTE_NAMES, &BLACK_NOTES, &AUTOSAVE, &BACKUP_LOCATION, &STARTUP_PROJECT, &COLORFUL_WAVEFORMS, &ANIMATION_REFRESH_RATE, &TRANSPARENT_WINDOWS, &CURSORS_SCALING, &LEGACY_SCALING, &OPTIMIZE_FOR, &RESAMPLING_QUALITY, &PROJECT_DATA_SIZE_WARNING, &TOOLBARS_SCALING, &ASK_DATA_FOLDER, &VELOCITY_LINK, &RELEASE_LINK, &CONTROLLER_TYPE, &SYNC_TYPE, &COUNT_IN_LENGTH, &EXTERNAL_INPUT, &ROLLING_BUFFER];
+pub const COMBOS: &[&Combo] = &[&MAIN_GUI_SCALING, &POPUPS_SCALING, &NOTE_NAMES, &BLACK_NOTES, &AUTOSAVE, &BACKUP_LOCATION, &STARTUP_PROJECT, &COLORFUL_WAVEFORMS, &ANIMATION_REFRESH_RATE, &TRANSPARENT_WINDOWS, &CURSORS_SCALING, &LEGACY_SCALING, &OPTIMIZE_FOR, &RESAMPLING_QUALITY, &PROJECT_DATA_SIZE_WARNING, &TOOLBARS_SCALING, &ASK_DATA_FOLDER, &VELOCITY_LINK, &RELEASE_LINK, &CONTROLLER_TYPE, &SYNC_TYPE, &COUNT_IN_LENGTH, &EXTERNAL_INPUT, &ROLLING_BUFFER, &ROLLING_WAVE_MODE];
 /// The declared combos no settings page shows (a window of their own does): General ▸ Input ▸ Manage shortcuts' rows
 /// (`crate::shortcuts`). Read by the declaration tests.
 #[cfg_attr(not(test), allow(dead_code))]
