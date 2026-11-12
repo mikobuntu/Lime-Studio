@@ -3043,9 +3043,9 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
                         .map(|divisor| {
                             let label = match divisor {
                                 1 => "Off",
-                                2 => "1/2",
-                                4 => "1/4",
-                                8 => "1/8",
+                                2 => "2x",
+                                4 => "4x",
+                                8 => "8x",
                                 _ => unreachable!(),
                             };
                             PItem::new(label, Cmd::ClipHalftime(i, divisor)).mark(Mark::Radio(match (divisor, c.effect()) {

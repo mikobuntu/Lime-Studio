@@ -83,6 +83,8 @@ struct Trigger {
     channel: usize,
     /// Key rate; the voice plays at the channel's current base rate times this.
     rate: f64,
+    /// Clip-local playback speed. Native sample voices multiply their step by this; hosted samplers receive it as pitch.
+    speed: f64,
     /// Tick at which the voice is cut (end of an audio clip), if any.
     cut: Option<u64>,
     /// Velocity gain and note pan (âˆ’1..=1); the channel's volume and pan apply while it plays.
@@ -133,6 +135,11 @@ impl Trigger {
     fn origin(&self) -> Origin {
         (self.via.map_or(self.channel, |w| w.layer), self.key, self.swing.map_or(self.at, |s| s.base))
     }
+}
+
+/// Resampling at a slower speed lowers pitch by the corresponding number of semitones.
+fn speed_pitch_semitones(speed: f64) -> f32 {
+    (12.0 * speed.max(f64::MIN_POSITIVE).log2()) as f32
 }
 
 /// What a note the main swing can move needs to be placed again when the swing changes while the song plays
@@ -1550,7 +1557,8 @@ impl Engine {
                     at: n.tick,
                     channel: n.channel,
                     // The note's fine pitch is the voice's pitch offset, kept apart from its key (spec: audio/voice-levels.md).
-                    rate: laws::playback_rate(n.key, laws::fine_pitch_cents(n.fine)) * n.speed,
+                    rate: laws::playback_rate(n.key, laws::fine_pitch_cents(n.fine)),
+                    speed: n.speed,
                     fine: laws::fine_pitch_cents(n.fine) as f32 / 100.0,
                     cut: n.cut,
                     // A playlist audio clip's voice has its own volume in place of a velocity: unity through a channel at
@@ -2388,7 +2396,7 @@ impl Engine {
                 let ch = self.channels.get(t.channel)?;
                 let frames = ch.frames(t.buf)? as f64;
                 let since = at - frame(t.tick);
-                let from = t.from + since as f64 * t.rate * ch.base_rate;
+                let from = t.from + since as f64 * t.rate * t.speed * ch.base_rate;
                 let total = t.cut.map_or(u64::MAX, |c| frame(c) - frame(t.tick));
                 let plain = ClipShape { since: 0, total, fade_in: 0, fade_out: 0, tension_in: 0.0, tension_out: 0.0, gain: 1.0, declick: 0 };
                 let declick = (LATE_START_SECONDS * f64::from(self.rate)).round() as u64;
@@ -3568,7 +3576,7 @@ impl Engine {
                     vel: f32::from(t.velocity) / 128.0,
                     start: t.start,
                     end: t.stop,
-                    fine: t.fine,
+                    fine: t.fine + speed_pitch_semitones(t.speed),
                     long: t.end.is_some(),
                     glide: 0,
                     levels: t.levels,
@@ -3609,7 +3617,7 @@ impl Engine {
         self.voices.push(Voice {
             channel: t.channel,
             pos: t.from,
-            step: t.rate,
+            step: t.rate * t.speed,
             cut: t.cut,
             release_at: t.end,
             vel: t.vel,
@@ -3626,7 +3634,7 @@ impl Engine {
             shape: t.shape,
             buf: t.buf,
             key: t.key,
-            slide: VoiceSlide::new(t.rate, t.velocity, t.pan),
+            slide: VoiceSlide::new(t.rate * t.speed, t.velocity, t.pan),
             colour: t.colour,
             via: t.via,
             origin: Some(t.origin()),
@@ -5287,6 +5295,14 @@ mod tests {
     // spec: audio/pattern-controls.md (note repeat and channel control points, measured in FL)
     use super::*;
     use os_model::{Channel, Note, Pattern};
+
+    #[test]
+    fn clip_speed_maps_to_native_rate_and_sampler_pitch() {
+        assert_eq!(speed_pitch_semitones(1.0), 0.0);
+        assert!((speed_pitch_semitones(0.5) + 12.0).abs() < 1e-6);
+        assert!((speed_pitch_semitones(0.25) + 24.0).abs() < 1e-6);
+        assert!((speed_pitch_semitones(0.125) + 36.0).abs() < 1e-6);
+    }
 
     fn channel() -> Channel {
         Channel {
