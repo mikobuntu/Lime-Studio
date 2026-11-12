@@ -1472,6 +1472,25 @@ pub fn window(s: &State, c: &Clip) -> (f64, f64) {
     c.window.unwrap_or_else(|| (0.0, to_src(s, c.source, f64::from(c.length))))
 }
 
+/// Audio clips that paint the same channel source are linked source references. Their timeline placement and track
+/// remain independent, while source window and audio presentation edits are shared.
+fn linked_audio_indices(s: &State, source: ClipSource) -> Vec<usize> {
+    if !matches!(source, ClipSource::Channel(_)) || source_kind(s, source) != PickKind::Audio {
+        return Vec::new();
+    }
+    clips(s).iter().enumerate().filter(|(_, c)| c.source == source).map(|(i, _)| i).collect()
+}
+
+fn update_linked_audio(s: &mut State, source: ClipSource, mut update: impl FnMut(&mut Clip)) {
+    let indices = linked_audio_indices(s, source);
+    let arr = arr_mut(s);
+    for i in indices {
+        if let Some(c) = arr.clips.get_mut(i) {
+            update(c);
+        }
+    }
+}
+
 /// Ticks to the source's unit.
 pub fn to_src(s: &State, src: ClipSource, ticks: f64) -> f64 {
     match source_kind(s, src) {
@@ -1883,9 +1902,15 @@ pub fn resize_right(s: &mut State, i: usize, orig: &Clip, len: u32) {
         ClipSource::Pattern(_) => true,
         ClipSource::Channel(_) => source_kind(s, orig.source) == PickKind::Audio,
     };
-    if let Some(c) = arr_mut(s).clips.get_mut(i) {
-        c.length = len.max(1);
-        if orig.window.is_some() || cuts {
+    let len = len.max(1);
+    if cuts {
+        update_linked_audio(s, orig.source, |c| {
+            c.length = len;
+            c.window = Some((w0, end));
+        });
+    } else if let Some(c) = arr_mut(s).clips.get_mut(i) {
+        c.length = len;
+        if orig.window.is_some() {
             c.window = Some((w0, end));
         }
     }
@@ -1921,10 +1946,19 @@ pub fn resize_left(s: &mut State, i: usize, orig: &Clip, dt: i64) {
     let min_dt = -(w0 / to_src(s, orig.source, 1.0)).floor() as i64;
     let dt = dt.max(min_dt).max(-i64::from(orig.position)).min(i64::from(orig.length) - 1);
     let d = to_src(s, orig.source, dt as f64);
-    if let Some(c) = arr_mut(s).clips.get_mut(i) {
-        c.position = (i64::from(orig.position) + dt) as u32;
-        c.length = (i64::from(orig.length) - dt) as u32;
-        c.window = Some(((w0 + d).max(0.0), w1));
+    let len = (i64::from(orig.length) - dt) as u32;
+    let start = (w0 + d).max(0.0);
+    if linked_audio_indices(s, orig.source).len() <= 1 {
+        if let Some(c) = arr_mut(s).clips.get_mut(i) {
+            c.position = (i64::from(orig.position) + dt) as u32;
+            c.length = len;
+            c.window = Some((start, w1));
+        }
+    } else {
+        update_linked_audio(s, orig.source, |c| {
+            c.length = len;
+            c.window = Some((start, w1));
+        });
     }
     s.piano.dirty = true;
 }
@@ -3814,41 +3848,45 @@ pub fn drag_move(app: &mut App, d: PlDrag, grid: Rect) {
             // A fade reaches at most to where the other one starts.
             let px = if out { (body.right() - x).clamp(0.0, body.right() - fx_in) } else { (x - body.x).clamp(0.0, fx_out - body.x) };
             let ms = (f64::from(px / g.ppt) * fade_ms_per_tick(s)) as f32;
-            let c = &mut arr_mut(s).clips[clip];
+            let source = c.source;
             let on = (px >= 2.0).then_some(ms);
             // A fade set with its handle gets its bit (and leaves the automatic crossfades); dragged to nothing, the
             // edge is theirs again (spec: audio/audio-clips.md "Automatic crossfades").
-            if out {
-                let t = c.fade_out_tension();
-                c.set_fade_out(on.map(|ms| (ms, t)));
-            } else {
-                let t = c.fade_in_tension();
-                c.set_fade_in(on.map(|ms| (ms, t)));
-            }
-            let c = *c;
+            let (tin, tout) = (c.fade_in_tension(), c.fade_out_tension());
+            update_linked_audio(s, source, |c| {
+                if out {
+                    c.set_fade_out(on.map(|ms| (ms, tout)));
+                } else {
+                    c.set_fade_in(on.map(|ms| (ms, tin)));
+                }
+            });
+            let c = clips(s)[clip];
             app.hint = Cow::Owned(handle_hint(&c, if out { Handle::FadeOut } else { Handle::FadeIn }));
             app.state.piano.dirty = true;
         }
         PlDrag::FadeTension { clip, out, y0, t0 } => {
             let t = (t0 + (y0 - y) * TENSION_PER_PX).clamp(-40.0, 40.0);
-            let c = &mut arr_mut(s).clips[clip];
+            let source = clips(s)[clip].source;
             // The tension alone: the length and the bit stay (a stored fade without its bit plays with the switch off).
-            if out {
-                if c.stored_fade_out().is_some() {
-                    c.set_fade_out_tension(t);
+            update_linked_audio(s, source, |c| {
+                if out {
+                    if c.stored_fade_out().is_some() {
+                        c.set_fade_out_tension(t);
+                    }
+                } else if c.stored_fade_in().is_some() {
+                    c.set_fade_in_tension(t);
                 }
-            } else if c.stored_fade_in().is_some() {
-                c.set_fade_in_tension(t);
-            }
-            let c = *c;
+            });
+            let c = clips(s)[clip];
             app.hint = Cow::Owned(handle_hint(&c, if out { Handle::TensionOut } else { Handle::TensionIn }));
             app.state.piano.dirty = true;
         }
         PlDrag::Gain { clip, y0, db0 } => {
             let db = (db0 + (y0 - y) * DB_PER_PX).clamp(-60.0, 24.0);
-            let c = &mut arr_mut(s).clips[clip];
-            c.set_gain(10f32.powf(db / 20.0));
-            let c = *c;
+            let source = clips(s)[clip].source;
+            let gain = 10f32.powf(db / 20.0);
+            update_linked_audio(s, source, |c| c.set_gain(gain));
+            let c = clips(s)[clip];
             app.hint = Cow::Owned(handle_hint(&c, Handle::Gain));
             app.state.piano.dirty = true;
         }
@@ -5700,6 +5738,48 @@ mod tests {
         let mut app = App::new(None);
         app.state.project = crate::app::test_project();
         app
+    }
+
+    #[test]
+    fn painted_audio_clips_share_source_edits_but_keep_placement() {
+        let mut app = app();
+        let source = ClipSource::Channel(app.state.project.channels[0].index);
+        app.state.project.channels[0].kind = os_model::ChannelKind::AudioClip;
+        arr_mut(&mut app.state).clips = vec![
+            Clip::new(0, 96, 0, source),
+            Clip::new(384, 192, 1, source),
+            Clip::new(768, 48, 2, source),
+        ];
+        let original_positions: Vec<_> = clips(&app.state).iter().map(|c| (c.position, c.track)).collect();
+        let orig = clips(&app.state)[0];
+
+        resize_right(&mut app.state, 0, &orig, 144);
+        let shared_window = clips(&app.state)[0].window;
+        for c in clips(&app.state) {
+            assert_eq!(c.length, 144);
+            assert_eq!(c.window, shared_window);
+        }
+        assert_eq!(clips(&app.state).iter().map(|c| (c.position, c.track)).collect::<Vec<_>>(), original_positions);
+
+        let orig = clips(&app.state)[0];
+        resize_left(&mut app.state, 0, &orig, 24);
+        let shared_window = clips(&app.state)[0].window;
+        for c in clips(&app.state) {
+            assert_eq!(c.length, 120);
+            assert_eq!(c.window, shared_window);
+        }
+        assert_eq!(clips(&app.state).iter().map(|c| (c.position, c.track)).collect::<Vec<_>>(), original_positions);
+
+        update_linked_audio(&mut app.state, source, |c| {
+            c.set_gain(0.5);
+            c.set_fade_in(Some((80.0, 0.25)));
+            c.set_fade_out(Some((120.0, -0.5)));
+        });
+        for c in clips(&app.state) {
+            assert_eq!(c.gain(), 0.5);
+            assert_eq!(c.fade_in(), Some((80.0, 0.25)));
+            assert_eq!(c.fade_out(), Some((120.0, -0.5)));
+        }
     }
 
     /// Rename... on an audio or automation clip renames its channel in the rack's name box; a pattern clip still edits
