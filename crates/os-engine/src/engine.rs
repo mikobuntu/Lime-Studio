@@ -5457,6 +5457,16 @@ mod tests {
                 "mode {model} did not alter rendered audio"
             );
         }
+        baseline.arrangements[0].clips[0].set_effect(os_model::ClipEffect::None);
+        let dry_live = process_song(&baseline);
+        for model in 0..10 {
+            baseline.arrangements[0].clips[0].set_effect(os_model::ClipEffect::Lofi(model));
+            let wet_live = process_song(&baseline);
+            assert!(
+                wet_live.iter().zip(&dry_live).any(|(a, b)| (a - b).abs() > 1.0e-5),
+                "live mode {model} did not alter rendered audio"
+            );
+        }
         let _ = std::fs::remove_file(path);
     }
 
@@ -6269,6 +6279,14 @@ mod tests {
     fn render_song(p: &Project) -> Vec<f32> {
         let mut lib = SampleLibrary::new(None);
         Engine::new(p, &mut lib, 44100, PlayMode::Song).render_all(512)
+    }
+
+    fn process_song(p: &Project) -> Vec<f32> {
+        let mut lib = SampleLibrary::new(None);
+        let mut engine = Engine::new(p, &mut lib, 44100, PlayMode::Song);
+        let mut out = vec![0.0; 8192];
+        engine.process(&mut out);
+        out
     }
 
     fn peak(x: &[f32], ch: usize) -> f32 {
