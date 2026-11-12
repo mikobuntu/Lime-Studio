@@ -227,18 +227,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
 }
 
 fn spectrum_color(hue: f32, alpha: f32) -> os_ui::Color {
-    let h = hue.rem_euclid(1.0) * 6.0;
-    let x = 1.0 - ((h % 2.0) - 1.0).abs();
-    let (r, g, b) = match h as u32 {
-        0 => (1.0, x, 0.0),
-        1 => (x, 1.0, 0.0),
-        2 => (0.0, 1.0, x),
-        3 => (0.0, x, 1.0),
-        4 => (x, 0.0, 1.0),
-        _ => (1.0, 0.0, x),
-    };
-    os_ui::Color::rgb(((r * 255.0) as u32) << 16 | ((g * 255.0) as u32) << 8 | (b * 255.0) as u32)
-        .with_alpha((alpha * 255.0) as u8)
+    os_ui::Color::from_hsl_pub(hue.rem_euclid(1.0) * 360.0, 1.0, 0.5, (alpha * 255.0) as u8)
 }
 
 #[cfg(test)]
@@ -253,6 +242,7 @@ mod tests {
         assert_eq!(a.a, 127);
         let green = spectrum_color(1.0 / 3.0, 0.5);
         let blue = spectrum_color(2.0 / 3.0, 0.5);
+        assert!(a.r > a.g && a.r > a.b);
         assert!(green.g > green.r && green.g > green.b);
         assert!(blue.b > blue.r && blue.b > blue.g);
     }

@@ -10321,6 +10321,10 @@ impl App {
         let dy = crate::views::rolling::strip_h(&self.state) - before;
         lift_windows(&mut self.state, dy);
         self.state.roll.wave = None;
+        if !self.state.roll.collapsed {
+            // Rebuild the view immediately from the retained tape; no new transport block is needed after expanding.
+            crate::views::rolling::pull(self);
+        }
         self.invalidate();
     }
 
