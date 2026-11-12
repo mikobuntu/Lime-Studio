@@ -4129,7 +4129,7 @@ fn lofi_profile(model: u8) -> Option<LofiProfile> {
         3 => Some(LofiProfile { clock: 26040.0, bits: 12, mono: true, filter: true, adaptive: false, mfx: false, depth: 1.0 }),
         4 => Some(LofiProfile { clock: 44100.0, bits: 16, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.0 }),
         5 => Some(LofiProfile { clock: 22050.0, bits: 12, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.5 }),
-        6 => Some(LofiProfile { clock: 11025.0, bits: 8, mono: false, filter: true, adaptive: false, mfx: true, depth: 1.0 }),
+        6 => Some(LofiProfile { clock: 11025.0, bits: 8, mono: false, filter: true, adaptive: false, mfx: true, depth: 0.5 }),
         7 => Some(LofiProfile { clock: 31250.0, bits: 16, mono: false, filter: true, adaptive: true, mfx: false, depth: 0.45 }),
         8 => Some(LofiProfile { clock: 15625.0, bits: 12, mono: false, filter: false, adaptive: true, mfx: false, depth: 0.75 }),
         9 => Some(LofiProfile { clock: 7812.5, bits: 4, mono: false, filter: false, adaptive: true, mfx: false, depth: 1.0 }),
@@ -5505,7 +5505,8 @@ mod tests {
         assert_eq!((sp.clock, sp.bits, sp.mono, sp.filter), (26040.0, 12, true, false));
         let p6 = lofi_profile(4).expect("P-6 profile");
         assert_eq!((p6.clock, p6.bits, p6.mono, p6.filter, p6.mfx, p6.depth), (44100.0, 16, false, true, true, 0.0));
-        assert!(lofi_profile(6).expect("P-6 11.025 kHz profile").filter, "the low P-6 clock needs reconstruction filtering");
+        let p6_low = lofi_profile(6).expect("P-6 11.025 kHz profile");
+        assert_eq!((p6_low.clock, p6_low.filter, p6_low.mfx, p6_low.depth), (11025.0, true, true, 0.5));
         let sp202 = lofi_profile(9).expect("SP-202 adaptive profile");
         assert_eq!((sp202.clock, sp202.bits, sp202.adaptive), (7812.5, 4, true));
         assert!(lofi_profile(10).is_none());
