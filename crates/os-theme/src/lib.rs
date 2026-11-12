@@ -229,13 +229,13 @@ fn line_at(grid: Color, c: Color, k: f32) -> Color {
 }
 
 tokens! {
-    toolbar = 0x202628, "Toolbar rows and their panels.";
-    toolbar_line = 0x171c1e, "Separator lines between toolbar rows and groups.";
-    toolbar_edge = 0x30383a, "Light top edge of toolbar groups.";
-    sunken = 0x1d2224, "Sunken panels: hint bar, monitors.";
-    sunken_dark = 0x14191b, "CPU / memory panel.";
-    time_panel = 0x222b2c, "Song position display.";
-    menu_panel = 0x273031, "Menu bar background.";
+    toolbar = 0x2e3234, "Toolbar rows and their panels.";
+    toolbar_line = 0x222628, "Separator lines between toolbar rows and groups.";
+    toolbar_edge = 0x3a3f41, "Light top edge of toolbar groups.";
+    sunken = 0x25282a, "Sunken panels: hint bar, monitors.";
+    sunken_dark = 0x1c1e20, "CPU / memory panel.";
+    time_panel = 0x2c3334, "Song position display.";
+    menu_panel = 0x313838, "Menu bar background.";
     menu_text = 0xbcd0dc, "Menu bar items.";
     news_panel = 0x2a2e30, "News panel.";
     button = 0x292d2f, "Toolbar button face.";
@@ -245,27 +245,27 @@ tokens! {
     text = 0xd4dade, "Primary text.";
     text_dim = 0x7e8386, "Secondary text.";
     text_faint = 0x6d7275, "Faint labels (track names, numbers).";
-    on_top = 0xe2ff91, "'On' button gradient, top.";
-    on_bottom = 0x9bdc45, "'On' button gradient, bottom.";
-    on_glyph = 0x193600, "Glyph on an 'on' button.";
-    pill = 0xb9ed52, "Active PAT/SONG pill.";
-    pill_text = 0x1c3200, "Text on the active pill.";
+    on_top = 0xffe193, "'On' button gradient, top.";
+    on_bottom = 0xf59a3c, "'On' button gradient, bottom.";
+    on_glyph = 0xb14000, "Glyph on an 'on' button.";
+    pill = 0xf7a94c, "Active PAT/SONG pill.";
+    pill_text = 0x3b1d00, "Text on the active pill.";
     record = 0xfb655e, "Record dot.";
     tempo_box = 0x3b3f41, "Tempo field.";
-    accent = 0xb4ee52, "Lime accent: LEDs, selection.";
-    accent_dim = 0x527b25, "Dim lime accent: unlit LEDs.";
-    workspace = 0x282e30, "Workspace background.";
-    watermark = 0x30383a, "Workspace logo watermark.";
+    accent = 0xa8e44a, "Green accent: LEDs, selection.";
+    accent_dim = 0x4d6b22, "Dim accent: unlit LEDs.";
+    workspace = 0x333438, "Workspace background.";
+    watermark = 0x3a3c40, "Workspace logo watermark.";
     version_text = 0x555a5e, "Version string under the watermark.";
-    browser_title = 0x202628, "Browser title bar.";
-    browser_tabs = 0x151a1c, "Browser tab strip.";
-    browser_tab_outline = 0xb4ee52, "Active browser tab outline.";
-    browser_list = 0x030607, "Browser list background.";
-    browser_row_hi = 0x192022, "Highlighted browser row.";
+    browser_title = 0x292d2f, "Browser title bar.";
+    browser_tabs = 0x1a1e1f, "Browser tab strip.";
+    browser_tab_outline = 0xd0a080, "Active browser tab outline.";
+    browser_list = 0x040809, "Browser list background.";
+    browser_row_hi = 0x1e2224, "Highlighted browser row.";
     browser_folder = 0xa9bcc8, "Browser folder entries.";
-    browser_footer = 0x111618, "Browser footer (tags / search).";
-    browser_search = 0xb4ee52, "Search glyph.";
-    cat_project = 0xb4ee52, "Browser category: current project.";
+    browser_footer = 0x16191b, "Browser footer (tags / search).";
+    browser_search = 0xf08a30, "Search glyph.";
+    cat_project = 0xc09080, "Browser category: current project.";
     cat_recent = 0x9bc58a, "Browser category: recent files.";
     cat_plugin_db = 0x93b4d6, "Browser category: plugin database.";
     cat_plugin_presets = 0xb98aa6, "Browser category: plugin presets.";
@@ -273,27 +273,27 @@ tokens! {
     cat_mixer_presets = 0xa890b8, "Browser category: mixer presets.";
     splitter = 0x272a2c, "Splitter between browser and windows.";
     splitter_dark = 0x1b1e20, "Splitter shadow, window borders.";
-    window_title = 0x1e2426, "Window title bars.";
-    window_title_float = 0x1e2426, "Floating window title bars.";
-    window_title_hi = 0x252d2f, "Top highlight row of floating title bars.";
-    window_body = 0x1e2426, "Floating window body / footer.";
-    window_border = 0x121719, "Floating window outer border.";
-    picker = 0x1b2123, "Playlist picker panel.";
-    track_header = 0x232a2c, "Playlist track headers.";
-    overview = 0x2b3133, "Playlist overview / scroll bars.";
-    ruler = 0x080c0e, "Time rulers.";
+    window_title = 0x25292b, "Window title bars.";
+    window_title_float = 0x25292b, "Floating window title bars.";
+    window_title_hi = 0x2a2e30, "Top highlight row of floating title bars.";
+    window_body = 0x25292b, "Floating window body / footer.";
+    window_border = 0x191d1f, "Floating window outer border.";
+    picker = 0x222627, "Playlist picker panel.";
+    track_header = 0x292c2e, "Playlist track headers.";
+    overview = 0x323537, "Playlist overview / scroll bars.";
+    ruler = 0x0c1012, "Time rulers.";
     ruler_text = 0x607a7a, "Ruler numbers.";
-    grid = 0x1b2225, "Playlist grid rows.";
-    grid_alt = 0x20282b, "Alternate bar groups.";
-    grid_gap = 0x151b1d, "Gap between playlist tracks / beat lines.";
-    grid_bar = 0x080c0f, "Bar lines.";
-    scrollbar = 0x1c2325, "Scroll bar track.";
+    grid = 0x22272b, "Playlist grid rows.";
+    grid_alt = 0x262b2f, "Alternate bar groups.";
+    grid_gap = 0x1a1e1f, "Gap between playlist tracks / beat lines.";
+    grid_bar = 0x0b0e11, "Bar lines.";
+    scrollbar = 0x232729, "Scroll bar track.";
     playhead = 0x9fe05a, "Playback position line.";
-    mixer_bg = 0x1b2022, "Mixer strip area.";
-    mixer_strip = 0x202528, "Mixer strip body.";
-    mixer_strip_dark = 0x171c1f, "Fader well / strip lower body.";
-    mixer_panel = 0x293133, "Mixer right panel.";
-    slot = 0x1d2325, "Effect slot.";
+    mixer_bg = 0x232527, "Mixer strip area.";
+    mixer_strip = 0x25282b, "Mixer strip body.";
+    mixer_strip_dark = 0x1d1f22, "Fader well / strip lower body.";
+    mixer_panel = 0x313436, "Mixer right panel.";
+    slot = 0x25282a, "Effect slot.";
     slot_text = 0x5d6366, "Empty slot label.";
     slot_text_used = 0xc9d0d4, "Occupied slot label.";
     fader_handle = 0x4b4c4f, "Fader handle.";
@@ -313,7 +313,7 @@ tokens! {
     step_dim_b = 0x4d4042, "Steps past the pattern length, odd groups.";
     step_dim_border = 0x25282a, "Border of steps past the pattern length.";
     step_on = 0xd8dde0, "Lit step.";
-    add_hover = 0xc9f76a, "Hovered add-channel button outline.";
+    add_hover = 0xffbc40, "Hovered add-channel button outline.";
     menu_drop = 0x2b3032, "Dropdown menu background.";
     menu_drop_hi = 0x47555c, "Dropdown menu hovered row.";
     menu_drop_text = 0xd4dade, "Dropdown menu text.";
@@ -356,7 +356,7 @@ tokens! {
 }
 
 /// Role-mapped literals: widgets that need a measured shade with no token of its own write it as
-/// `t.s(0x313436)` (surface), `t.a(..)` (lime accent), `t.h(..)` (lime highlight), `t.tx(..)` (text),
+/// `t.s(0x313436)` (surface), `t.a(..)` (accent green), `t.h(..)` (orange highlight), `t.tx(..)` (text),
 /// `t.led(..)` (enable LEDs). Under the default theme each returns the literal unchanged; under an imported theme
 /// it follows the same mapping as the named tokens of that role (spec: ui/flstheme.md §4).
 impl Palette {

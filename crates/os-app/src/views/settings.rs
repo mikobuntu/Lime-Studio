@@ -1586,7 +1586,7 @@ fn paint_row_at(ui: &mut Ui, s: &State, group: &'static str, row: &Row, g: Rect,
             kit::combo(ui.c, t, b, v, f, kit::State::hover(hov));
             ui.c.text(f, b.right() + 8.0, ty, t.text, label);
             let dot = Rect::new(b.right() + 8.0 + ui.c.text_width(f, label) + 8.0, ty + 3.0, 12.0, 12.0);
-            let colour = crate::prefs::scrolling_wave_color().map_or(ui.t.accent, |c| os_ui::Color::rgb(c));
+            let colour = crate::prefs::scrolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), |c| os_ui::Color::rgb(c));
             ui.c.fill_rrect(dot, 6.0, colour);
             ui.c.stroke_rrect(dot, 6.0, 1.0, t.s(0x161819));
         }

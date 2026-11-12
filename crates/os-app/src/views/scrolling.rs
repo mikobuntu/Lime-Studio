@@ -139,7 +139,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
     let mid = wv.y + wv.h / 2.0;
     let amp = wv.h / 2.0 - 1.0;
     let palette = crate::prefs::index(&crate::prefs::SCROLLING_WAVE_MODE);
-    let custom = crate::prefs::scrolling_wave_color().map_or(ui.t.accent, os_ui::Color::rgb);
+    let custom = crate::prefs::scrolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
     for (c, &(lo, hi)) in s.scroll.cols.iter().enumerate() {
         let at = s.scroll.from + (s.scroll.visible as f64 * (c as f64 + 0.5) / s.scroll.cols.len().max(1) as f64) as u64;
         if (lo, hi) == (0.0, 0.0) && !(s.scroll.have.0..s.scroll.have.1).contains(&at) {
@@ -164,7 +164,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         let ink = if palette == 1 {
             custom
         } else {
-            ui.t.accent
+            ui.t.tx(0xb9bfc3)
         };
         let fill = ink.with_alpha(30);
         let outline = ink.with_alpha(240);

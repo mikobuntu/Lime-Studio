@@ -6,7 +6,7 @@
 //! in use.
 //!
 //! `Citrus` (formerly Classic) is the measured default look. `Lemon` is Lemon Studio's own look: neutral greys, one
-//! lime-green brand colour and rounded-square controls (knobs stay round). It re-colours every token and every
+//! lemon-yellow brand colour and rounded-square controls (knobs stay round). It re-colours every token and every
 //! role-mapped literal (`Palette::s/a/h/tx/led`) through a `DesignMap` (a neutral lightness ramp plus key colours), sets
 //! the tokens the map can't get right outright, and tells the widget kit which shape language to draw (`Style`). A
 //! theme other than the stock Dark one is laid over Lemon's colours by a `Retint`.
@@ -173,7 +173,7 @@ pub fn classic_keys() -> Keys {
     let d = FlTheme::dark();
     Keys {
         selected: d.selected.unwrap_or(Color::rgb(0xa8e44a)),
-        highlight: d.highlight.unwrap_or(Color::rgb(0xc4f06a)),
+        highlight: d.highlight.unwrap_or(Color::rgb(0xfb9244)),
         text: d.text_color.unwrap_or(Color::rgb(0xc9d0d3)),
         mute: d.mute.unwrap_or(Color::rgb(0x78d008)),
     }
@@ -182,18 +182,18 @@ pub fn classic_keys() -> Keys {
 /// The Lemon brand palette (owner's base colours, 2026-10-12) and the in-between shades derived from it.
 pub mod lemon {
     use crate::Color;
-    /// Main colour (lime green): "on" controls, selection, the playhead, lit steps.
-    pub const MAIN: Color = Color::rgb(0xb9ed52);
+    /// Main colour (pale yellow): "on" controls, selection, the playhead, lit steps.
+    pub const MAIN: Color = Color::rgb(0xffe066);
     /// Highlight: the bright top of lit controls, hover on lit controls, selected notes.
-    pub const HIGHLIGHT: Color = Color::rgb(0xe2ff91);
+    pub const HIGHLIGHT: Color = Color::rgb(0xfff1b8);
     /// Dark: the main surface (toolbar).
-    pub const DARK: Color = Color::rgb(0x242a2b);
+    pub const DARK: Color = Color::rgb(0x3b3b3b);
     /// Dark highlight: raised faces on hover, hairlines, knob tracks.
-    pub const DARK_HIGHLIGHT: Color = Color::rgb(0x4b5651);
+    pub const DARK_HIGHLIGHT: Color = Color::rgb(0x666666);
     /// Coloured dark: glyphs and text on lemon, unlit LEDs, hovered menu rows.
-    pub const COLORED_DARK: Color = Color::rgb(0x193600);
+    pub const COLORED_DARK: Color = Color::rgb(0x473900);
     /// In-between: a darker lemon for edges of lit controls and meter bodies.
-    pub const DEEP: Color = Color::rgb(0x6f9f25);
+    pub const DEEP: Color = Color::rgb(0xc9a92c);
     /// Text on the greys.
     pub const TEXT: Color = Color::rgb(0xececec);
 }
@@ -607,11 +607,11 @@ mod tests {
         assert_eq!(p.pill, lemon::MAIN);
         assert_eq!(p.on_glyph, lemon::COLORED_DARK);
         // Role-mapped literals follow the design: Classic's raised grey lands on the dark highlight,
-        // Lime highlights on lemon.
+        // orange highlights on lemon.
         let g = p.s(0x505355);
         assert!(g.r.abs_diff(0x66) <= 6 && g.r == g.g && g.g == g.b, "{g}");
-        let (h, s, _) = p.h(0xc4f06a).hsl();
-        assert!((h - lemon::MAIN.hsl().0).abs() < 4.0 && s > 0.8, "{}", p.h(0xc4f06a));
+        let (h, s, _) = p.h(0xfb9244).hsl();
+        assert!((h - lemon::MAIN.hsl().0).abs() < 4.0 && s > 0.8, "{}", p.h(0xfb9244));
         assert_eq!(p.a(0xa8e44a), lemon::MAIN);
     }
 

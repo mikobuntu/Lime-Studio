@@ -30,7 +30,7 @@ pub const BASE: Surface = Surface { hue: 0.0, saturation: 0.0, lightness: 0.0, c
 /// The stock Dark theme's file text (its key colours; what Lemon Studio's default palette was measured with). A theme's
 /// `Lightmode` key is ignored: every theme is drawn as FL draws it with Light mode on (spec: ui/settings-choices.md
 /// "Light mode and clip note colours", removed 2026-10-18).
-pub const DARK_TEXT: &str = "Hue=0\nSaturation=0\nLightness=-153\nContrast=-8\nText=0\nSelected=11068490\nHighlight=7008452\n\
+pub const DARK_TEXT: &str = "Hue=0\nSaturation=0\nLightness=-153\nContrast=-8\nText=0\nSelected=11068490\nHighlight=-12283141\n\
      Mute=577656\nOption=-14135064\nStepEven=-13357016\nStepOdd=-12764317\nTextColor=-3551277\nBackMode=2\n";
 
 impl Surface {
@@ -533,9 +533,9 @@ mod tests {
         assert_eq!(get_key(text, "HUE"), Some("-20"), "the last line wins, any case");
         assert_eq!(get_key(text, "Mute"), None);
         assert_eq!(colour_of("Selected", 11068490), Color::rgb(0xa8e44a));
-        assert_eq!(colour_of("Highlight", 7008452), Color::rgb(0xc4f06a));
+        assert_eq!(colour_of("Highlight", -12283141), Color::rgb(0xfb9244));
         assert_eq!(colour_value("Selected", Color::rgb(0xa8e44a)), 0xa8e44a);
-        assert_eq!(colour_value("Highlight", Color::rgb(0xc4f06a)), 0x6af0c4);
+        assert_eq!(colour_value("Highlight", Color::rgb(0xfb9244)), 0x4492fb);
         assert_eq!(colour_value("textcolor", Color::rgb(0x123456)), 0x123456);
         let th = FlTheme::parse(&set_key(text, "Highlight", &colour_value("Highlight", Color::rgb(0x102030)).to_string()));
         assert_eq!(th.highlight, Some(Color::rgb(0x102030)));

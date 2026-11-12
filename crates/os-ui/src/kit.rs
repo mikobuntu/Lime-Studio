@@ -128,7 +128,7 @@ pub fn grip(c: &mut Canvas, t: &Palette, x: f32, y: f32) {
 // ---------------------------------------------------------------- buttons
 
 /// The FL-style raised button face (spec §1): 1 px border with softened corners, an elliptical radial face
-/// (light centre, darker edges) and a darker 1 px inner rim. `on`/pressed light it lime (Highlight role).
+/// (light centre, darker edges) and a darker 1 px inner rim. `on`/pressed light it orange (Highlight role).
 pub fn button(c: &mut Canvas, t: &Palette, r: Rect, st: State) {
     if lemon::on(t) {
         return lemon::button(c, t, r, st);
@@ -142,9 +142,9 @@ pub fn button(c: &mut Canvas, t: &Palette, r: Rect, st: State) {
         return;
     }
     let (border, center, edge) = if st.on {
-        (t.h(0x4f7f16), t.h(0xe2ff91), t.h(0xa6df4e))
+        (t.h(0xbe5507), t.h(0xfffaab), t.h(0xffaf65))
     } else if st.pressed {
-        (t.h(0x4f7f16), t.h(0xd0f477), t.h(0x8fc53b))
+        (t.h(0xbe5507), t.h(0xffe598), t.h(0xf99448))
     } else if st.hover {
         (t.s(0x191d1f), t.s(0x3d4244), t.s(0x2c3133))
     } else {
