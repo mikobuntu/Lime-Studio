@@ -98,7 +98,7 @@ pub fn big_dial(c: &mut Canvas, cx: f32, cy: f32, value: f32, dot: Color, st: St
     c.line(cx + 6.0 * s, cy + 6.0 * co, cx + 16.0 * s, cy + 16.0 * co, 2.4, Color::rgb(0xe6e6e6));
 }
 
-/// Round radio / toggle, 15 px: dark with a grey ring when off, glowing red-orange when on; a disabled option that is
+/// Round radio / toggle, 15 px: dark with a grey ring when off, glowing lime when on; a disabled option that is
 /// on shows a dim brown dot (it still toggles).
 pub fn radio(c: &mut Canvas, t: &Palette, cx: f32, cy: f32, on: bool, st: State) {
     if lemon::on(t) {
@@ -107,15 +107,15 @@ pub fn radio(c: &mut Canvas, t: &Palette, cx: f32, cy: f32, on: bool, st: State)
     }
     c.fill_circle(cx, cy, 7.5, if st.hover && !st.disabled { t.s(0x6c6e6e) } else { t.s(0x606262) });
     if on && !st.disabled {
-        c.fill_circle(cx, cy, 6.5, t.h(0x522f2f));
-        c.fill_circle(cx, cy, 5.6, t.h(0x942b15));
-        c.fill_circle(cx, cy, 4.8, t.h(0xee8a64));
-        c.fill_circle(cx, cy, 3.6, t.h(0xf19672));
-        c.fill_circle(cx - 1.0, cy - 1.4, 1.6, t.h(0xffc4a8).with_alpha(160));
+        c.fill_circle(cx, cy, 6.5, t.h(0x355d10));
+        c.fill_circle(cx, cy, 5.6, t.h(0x6fa52a));
+        c.fill_circle(cx, cy, 4.8, t.h(0xb9ed52));
+        c.fill_circle(cx, cy, 3.6, t.h(0xd8fb7d));
+        c.fill_circle(cx - 1.0, cy - 1.4, 1.6, t.h(0xf0ffbe).with_alpha(160));
     } else if on {
         c.fill_circle(cx, cy, 6.5, t.s(0x3a2e2c));
-        c.fill_circle(cx, cy, 5.2, t.h(0x6b4a40));
-        c.fill_circle(cx, cy, 3.6, t.h(0x84574a));
+        c.fill_circle(cx, cy, 5.2, t.h(0x4d7027));
+        c.fill_circle(cx, cy, 3.6, t.h(0x638d32));
     } else {
         c.fill_circle(cx, cy, 6.5, t.s(0x2e2f2f));
         c.fill_circle(cx, cy, 5.6, t.s(0x131516));
