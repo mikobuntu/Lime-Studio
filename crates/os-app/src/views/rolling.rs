@@ -7,7 +7,7 @@
 //! `App::tick` pulls the picture (`pull`), the paint draws it and registers the hits; the interactions live on
 //! `App` (`Action::Rolling`, `Drag::RollSel`).
 
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use os_ui::Rect;
 
@@ -140,7 +140,6 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
     let amp = wv.h / 2.0 - 1.0;
     let palette = crate::prefs::index(&crate::prefs::ROLLING_WAVE_MODE);
     let custom = crate::prefs::rolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
-    let pulse = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f32());
     for (c, &(lo, hi)) in s.roll.cols.iter().enumerate() {
         let at = s.roll.from + (s.roll.visible as f64 * (c as f64 + 0.5) / s.roll.cols.len().max(1) as f64) as u64;
         if (lo, hi) == (0.0, 0.0) && !(s.roll.have.0..s.roll.have.1).contains(&at) {
@@ -168,13 +167,6 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         };
         ui.c.fill_cell(Rect::new(wv.x + c as f32, y0.min(y1), 1.0, (y1 - y0).max(1.0)), ink);
     }
-    if palette == 2 {
-        let glow = (0.72 + 0.20 * (pulse * 2.2).sin()).clamp(0.45, 0.92);
-        let glow_color = spectrum_color((pulse * 0.035).rem_euclid(1.0), glow);
-        ui.c.stroke_rrect(wv.outset(1.0), 2.0, 1.0, glow_color);
-        ui.c.stroke_rrect(wv.outset(2.0), 3.0, 1.0, glow_color.with_alpha(55));
-    }
-
     // Paused (a Ctrl+click on the wave): the newest audio is not taken while it stands.
     if s.roll.paused {
         let text = "Paused";
