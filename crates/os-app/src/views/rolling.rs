@@ -150,7 +150,18 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         let y0 = mid - hi * amp;
         let y1 = mid - lo * amp;
         let ink = if palette == 2 {
-            spectrum_color((c as f32 / s.roll.cols.len().max(1) as f32 + pulse * 0.035) % 1.0, 0.82)
+            let span = s.roll.cols.len().saturating_sub(1).max(1) as f32;
+            let hue = (c as f32 / span + pulse * 0.035).rem_euclid(1.0);
+            let fill = spectrum_color(hue, 0.30);
+            let outline = spectrum_color(hue, 0.94);
+            let top = y0.min(y1);
+            let height = (y1 - y0).abs().max(1.0);
+            ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, height), fill);
+            ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, 1.0), outline);
+            if height > 1.0 {
+                ui.c.fill_cell(Rect::new(wv.x + c as f32, top + height - 1.0, 1.0, 1.0), outline);
+            }
+            continue;
         } else if palette == 1 {
             custom
         } else {
@@ -159,10 +170,10 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         ui.c.fill_cell(Rect::new(wv.x + c as f32, y0.min(y1), 1.0, (y1 - y0).max(1.0)), ink);
     }
     if palette == 2 {
-        let glow = (0.28 + 0.16 * (pulse * 2.2).sin()).clamp(0.10, 0.44);
-        let glow_color = spectrum_color((pulse * 0.035) % 1.0, glow);
+        let glow = (0.72 + 0.20 * (pulse * 2.2).sin()).clamp(0.45, 0.92);
+        let glow_color = spectrum_color((pulse * 0.035).rem_euclid(1.0), glow);
         ui.c.stroke_rrect(wv.outset(1.0), 2.0, 1.0, glow_color);
-        ui.c.stroke_rrect(wv.outset(2.0), 3.0, 1.0, glow_color.with_alpha((glow_color.a / 2).max(1)));
+        ui.c.stroke_rrect(wv.outset(2.0), 3.0, 1.0, glow_color.with_alpha(55));
     }
 
     // Paused (a Ctrl+click on the wave): the newest audio is not taken while it stands.
@@ -240,6 +251,9 @@ mod tests {
         let b = spectrum_color(1.0, 0.5);
         assert_eq!((a.r, a.g, a.b, a.a), (b.r, b.g, b.b, b.a));
         assert_eq!(a.a, 127);
-        assert_ne!(spectrum_color(0.0, 0.5).g, spectrum_color(0.33, 0.5).g);
+        let green = spectrum_color(1.0 / 3.0, 0.5);
+        let blue = spectrum_color(2.0 / 3.0, 0.5);
+        assert!(green.g > green.r && green.g > green.b);
+        assert!(blue.b > blue.r && blue.b > blue.g);
     }
 }
