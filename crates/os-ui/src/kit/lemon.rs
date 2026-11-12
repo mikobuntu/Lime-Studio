@@ -53,7 +53,7 @@ pub fn face(base: Color, st: State) -> Color {
 
 /// Text / glyph colour on a lemon face (the plugin editors' brand look).
 pub fn ink_on_lemon() -> Color {
-    brand::COLORED_DARK
+    os_theme::current().brand_ink(brand::COLORED_DARK)
 }
 
 /// Text / glyph colour on a lit face (`lit_in`) under the applied theme.
@@ -68,7 +68,9 @@ pub fn ink_on(col: Color) -> Color {
 
 /// Lit (lemon) face: a soft top-light gradient from the highlight to the main colour (the plugin editors' brand look).
 pub fn lit(c: &mut Canvas, r: Rect, radius: f32, hover: bool) {
-    let (top, bottom) = if hover { (brand::HIGHLIGHT, brand::MAIN.mix(brand::HIGHLIGHT, 0.35)) } else { (brand::HIGHLIGHT.mix(brand::MAIN, 0.45), brand::MAIN) };
+    let t = os_theme::current();
+    let (h, m) = (t.brand_lit(brand::HIGHLIGHT), t.brand_lit(brand::MAIN));
+    let (top, bottom) = if hover { (h, m.mix(h, 0.35)) } else { (h.mix(m, 0.45), m) };
     c.fill_rect_gradient(r, top, bottom, radius);
 }
 
@@ -415,17 +417,19 @@ pub fn dial_disc(c: &mut Canvas, cx: f32, cy: f32, disc: f32, st: State) {
 /// Toggle in place of a round radio (same centre): a 12 px rounded square, lemon when on. Disabled options are an
 /// outline, with a dim inner square when on (they still toggle).
 pub fn toggle(c: &mut Canvas, cx: f32, cy: f32, on: bool, st: State) {
+    let t = os_theme::current();
     let r = Rect::new(cx - 6.0, cy - 6.0, 12.0, 12.0);
     if st.disabled {
         c.stroke_rrect(r.inset(0.5), 3.5, 1.0, if st.hover { Color::rgb(0x5f5f5f) } else { Color::rgb(0x4f4f4f) });
         if on {
-            c.fill_rrect(r.inset(3.0), 2.0, Color::rgb(0x6e6436));
+            c.fill_rrect(r.inset(3.0), 2.0, t.brand_grey(brand::DEEP));
         }
         return;
     }
     if on {
-        c.fill_rrect(r, 4.0, brand::DEEP);
-        let (top, bottom) = if st.hover { (Color::rgb(0xffffff).mix(brand::HIGHLIGHT, 0.5), brand::HIGHLIGHT.mix(brand::MAIN, 0.5)) } else { (brand::HIGHLIGHT, brand::MAIN) };
+        c.fill_rrect(r, 4.0, t.brand_sel(brand::DEEP));
+        let (h, m) = (t.brand_lit(brand::HIGHLIGHT), t.brand_lit(brand::MAIN));
+        let (top, bottom) = if st.hover { (Color::rgb(0xffffff).mix(h, 0.5), h.mix(m, 0.5)) } else { (h, m) };
         c.fill_rect_gradient(r.inset(1.0), top, bottom, 3.0);
     } else {
         c.fill_rrect(r, 4.0, if st.hover { Color::rgb(0x111111) } else { plug::FIELD_LINE });
@@ -458,18 +462,19 @@ pub fn field(c: &mut Canvas, r: Rect, st: State) {
 /// Raised button (rounded square, radius `radius`): grey face with a dark outline, lit lemon when `st.on`; disabled,
 /// only an outline (olive when on, as a disabled `toggle`). Returns the colour for its label or glyph.
 pub fn plug_button(c: &mut Canvas, r: Rect, radius: f32, st: State) -> Color {
+    let t = os_theme::current();
     if st.disabled {
-        c.stroke_rrect(r.inset(0.5), (radius - 0.5).max(0.0), 1.0, if st.on { Color::rgb(0x6e6436) } else { plug::FACE });
+        c.stroke_rrect(r.inset(0.5), (radius - 0.5).max(0.0), 1.0, if st.on { t.brand_grey(brand::DEEP) } else { plug::FACE });
         return plug::OFF;
     }
     if st.on {
-        c.fill_rrect(r, radius, brand::DEEP);
+        c.fill_rrect(r, radius, t.brand_sel(brand::DEEP));
         lit(c, r.inset(1.0), (radius - 1.0).max(0.0), st.hover);
-        return brand::COLORED_DARK;
+        return t.brand_ink(brand::COLORED_DARK);
     }
     let fill = if st.pressed { Color::rgb(0x3a3a3a) } else if st.hover { Color::rgb(0x525252) } else { plug::FACE };
     outlined(c, r, radius, plug::FACE_LINE, fill);
-    if st.hover { Color::rgb(0xffffff) } else { brand::TEXT }
+    if st.hover { Color::rgb(0xffffff) } else { t.brand_ink(brand::TEXT) }
 }
 
 /// Text drawn letter by letter with `track` px between letters, left edge at `x`, top at `y`; returns its width.

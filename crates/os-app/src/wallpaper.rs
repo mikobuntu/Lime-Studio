@@ -16,6 +16,7 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
+use os_theme::Design;
 use os_ui::Rect;
 
 use crate::app::Ui;
@@ -142,12 +143,26 @@ pub fn paint(ui: &mut Ui, work: Rect) -> bool {
         let h = held.as_mut().expect("just set");
         let Some((w, ht, px)) = &h.image else { return false };
         if h.scaled.as_ref().is_none_or(|s| (s.0, s.1) != (dw, dh)) {
-            h.scaled = Some((dw, dh, cover(*w, *ht, px, dw, dh)));
+            let mut scaled = cover(*w, *ht, px, dw, dh);
+            if ui.t.style.design == Design::Lime {
+                darken_lime(&mut scaled);
+            }
+            h.scaled = Some((dw, dh, scaled));
         }
+
         let (sw, sh, spx) = h.scaled.as_ref().expect("just set");
         ui.c.image(work, *sw, *sh, spx);
         true
     })
+}
+
+fn darken_lime(px: &mut [u32]) {
+    for p in px {
+        let r = ((*p >> 16) & 0xff) * 55 / 100;
+        let g = ((*p >> 8) & 0xff) * 55 / 100;
+        let b = (*p & 0xff) * 55 / 100;
+        *p = (r << 16) | (g << 8) | b;
+    }
 }
 
 /// VIEW ▸ Background ▸ (spec: ui/menu-submenus.md §3): Set image wallpaper... picks a PNG or JPEG for the applied
@@ -234,6 +249,13 @@ mod tests {
         assert!(decode(b"GIF89a....").is_none());
         assert!(decode(&JPEG_RED_8X8[..40]).is_none(), "a cut file");
         assert!(read(Path::new("/no/such/picture.png")).is_none());
+    }
+
+    #[test]
+    fn lime_wallpaper_is_toned_down() {
+        let mut px = [0x80c040];
+        darken_lime(&mut px);
+        assert_eq!(px[0], 0x466822);
     }
 
     /// Cover keeps the picture's proportions: a wide picture loses its sides, a tall one its top and bottom.
