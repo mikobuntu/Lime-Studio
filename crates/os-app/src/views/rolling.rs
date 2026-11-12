@@ -148,7 +148,7 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
         let (lo, hi) = (lo.clamp(-1.0, 1.0), hi.clamp(-1.0, 1.0));
         let y0 = mid - hi * amp;
         let y1 = mid - lo * amp;
-        let ink = if palette == 2 {
+        if palette == 2 {
             let hue = spectrum_hue(c, s.roll.cols.len());
             let fill = spectrum_color(hue, 0.30);
             let outline = spectrum_color(hue, 0.94);
@@ -160,12 +160,21 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
                 ui.c.fill_cell(Rect::new(wv.x + c as f32, top + height - 1.0, 1.0, 1.0), outline);
             }
             continue;
-        } else if palette == 1 {
+        }
+        let ink = if palette == 1 {
             custom
         } else {
             ui.t.tx(0xb9bfc3)
         };
-        ui.c.fill_cell(Rect::new(wv.x + c as f32, y0.min(y1), 1.0, (y1 - y0).max(1.0)), ink);
+        let fill = ink.with_alpha(30);
+        let outline = ink.with_alpha(240);
+        let top = y0.min(y1);
+        let height = (y1 - y0).abs().max(1.0);
+        ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, height), fill);
+        ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, 1.0), outline);
+        if height > 1.0 {
+            ui.c.fill_cell(Rect::new(wv.x + c as f32, top + height - 1.0, 1.0, 1.0), outline);
+        }
     }
     // Paused (a Ctrl+click on the wave): the newest audio is not taken while it stands.
     if s.roll.paused {
