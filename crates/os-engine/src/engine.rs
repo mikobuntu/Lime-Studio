@@ -1550,7 +1550,7 @@ impl Engine {
                     at: n.tick,
                     channel: n.channel,
                     // The note's fine pitch is the voice's pitch offset, kept apart from its key (spec: audio/voice-levels.md).
-                    rate: laws::playback_rate(n.key, laws::fine_pitch_cents(n.fine)),
+                    rate: laws::playback_rate(n.key, laws::fine_pitch_cents(n.fine)) * n.speed,
                     fine: laws::fine_pitch_cents(n.fine) as f32 / 100.0,
                     cut: n.cut,
                     // A playlist audio clip's voice has its own volume in place of a velocity: unity through a channel at
@@ -4902,6 +4902,8 @@ struct Sched {
     cut: Option<u64>,
     /// Note length in ticks (0 = a step: it has no end of its own).
     len: u64,
+    /// Clip-local playback speed; resampling changes pitch together with duration.
+    speed: f64,
     /// Seconds into the sample where the voice starts (audio clip window start).
     from_s: f64,
     /// Seconds into the sample where an audio clip's window ends (`None`: the sample's end).
@@ -4931,6 +4933,7 @@ impl Sched {
             mod_y: n.mod_y,
             cut: None,
             len: u64::from(n.length),
+            speed: 1.0,
             from_s: 0.0,
             to_s: None,
             clip: None,
@@ -5248,7 +5251,8 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
             let fades = os_model::crossfade::playing(project, clips, project.tempo.unwrap_or(140.0));
             for (c, &fx) in clips.iter().zip(&fades) {
                 let start = u64::from(c.position);
-                let len = u64::from(c.length);
+                let speed = c.effect().speed();
+                let len = (f64::from(c.length) / speed).ceil().max(1.0) as u64;
                 if !c.muted {
                     end = end.max(start + len);
                 }
@@ -5266,7 +5270,7 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
                         Some(ChannelKind::AudioClip | ChannelKind::Sampler) => {
                             let from_s = c.window.map_or(0.0, |w| w.0.max(0.0) / 1000.0);
                             let to_s = c.window.filter(|w| w.0 >= 0.0 && w.1 >= 0.0).map(|w| w.1 / 1000.0);
-                            out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, from_s, to_s, clip: ClipFx::of(c, fx), slide: false, colour: 0, porta: false, swing: None });
+                            out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, speed, from_s, to_s, clip: ClipFx::of(c, fx), slide: false, colour: 0, porta: false, swing: None });
                         }
                         Some(ChannelKind::Automation) => {}
                         _ => report.automation_clips_ignored += 1,

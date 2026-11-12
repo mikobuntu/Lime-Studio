@@ -311,6 +311,7 @@ pub enum Cmd {
     ClipRename(usize),
     ClipRandomColor(usize),
     ClipPreview(usize),
+    ClipHalftime(usize, u8),
     /// A picker item's menu (§10a) on an audio or automation clip source: the command and the source's channel index.
     Pick(PickCmd, u16),
     PointDelete(u16, usize),
@@ -3033,6 +3034,30 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
             items.push(PItem::new("Make unique", Cmd::ClipUnique(i)));
         }
         PickKind::Audio => {
+            items.extend([
+                PItem::head("Clip effects"),
+                PItem::sub(
+                    "Halftime",
+                    [1, 2, 4, 8]
+                        .into_iter()
+                        .map(|divisor| {
+                            let label = match divisor {
+                                1 => "Off",
+                                2 => "1/2",
+                                4 => "1/4",
+                                8 => "1/8",
+                                _ => unreachable!(),
+                            };
+                            PItem::new(label, Cmd::ClipHalftime(i, divisor)).mark(Mark::Radio(match (divisor, c.effect()) {
+                                (1, os_model::ClipEffect::None) => true,
+                                (d, os_model::ClipEffect::Halftime(current)) => d == current,
+                                _ => false,
+                            }))
+                        })
+                        .collect(),
+                ),
+                PItem::sep(),
+            ]);
             items.push(PItem::new("Make unique", Cmd::ClipUnique(i)));
             items.push(PItem::new("Make unique as sample", Cmd::ClipUniqueSample(i)));
         }
@@ -5224,6 +5249,20 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
             snapshot(s);
             if let Some(c) = arr_mut(s).clips.get_mut(i) {
                 c.muted = !c.muted;
+            }
+            s.piano.dirty = true;
+            None
+        }
+        Cmd::ClipHalftime(i, divisor) => {
+            let Some(effect) = (divisor == 1).then_some(os_model::ClipEffect::None).or_else(|| os_model::ClipEffect::halftime(divisor)) else {
+                return Some("Halftime: unsupported ratio".into());
+            };
+            if !matches!(clips(s).get(i).map(|c| (c.source, c.effect())), Some((ClipSource::Channel(ch), old)) if source_kind(s, ClipSource::Channel(ch)) == PickKind::Audio && old != effect) {
+                return None;
+            }
+            snapshot_as(s, "Clip effect");
+            if let Some(c) = arr_mut(s).clips.get_mut(i) {
+                c.set_effect(effect);
             }
             s.piano.dirty = true;
             None
