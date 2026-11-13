@@ -140,42 +140,56 @@ pub fn paint(ui: &mut Ui, s: &State, _f: &FrameInfo) {
     let amp = wv.h / 2.0 - 1.0;
     let palette = crate::prefs::index(&crate::prefs::SCROLLING_WAVE_MODE);
     let custom = crate::prefs::scrolling_wave_color().map_or_else(|| ui.t.tx(0xb9bfc3), os_ui::Color::rgb);
+    let mut segment = Vec::new();
+    let paint_segment = |ui: &mut Ui, segment: &[(f32, f32, f32, usize)], palette: usize| {
+        if segment.is_empty() {
+            return;
+        }
+        let mut polygon = Vec::with_capacity(segment.len() * 2);
+        polygon.extend(segment.iter().map(|&(x, top, _, _)| (x, top)));
+        polygon.extend(segment.iter().rev().map(|&(x, _, bottom, _)| (x, bottom)));
+        let mut fill_color = |x: f32| {
+            let column = segment
+                .iter()
+                .min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs()))
+                .map_or(0, |&(_, _, _, column)| column);
+            spectrum_color(spectrum_hue(column, s.scroll.cols.len()), 0.30)
+        };
+        let mut outline_color = |x: f32| {
+            let column = segment
+                .iter()
+                .min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs()))
+                .map_or(0, |&(_, _, _, column)| column);
+            spectrum_color(spectrum_hue(column, s.scroll.cols.len()), 0.94)
+        };
+        if palette == 2 {
+            ui.c.fill_polygon_columns(&polygon, &mut fill_color);
+            let top: Vec<_> = segment.iter().map(|&(x, y, _, _)| (x, y)).collect();
+            let bottom: Vec<_> = segment.iter().map(|&(x, _, y, _)| (x, y)).collect();
+            ui.c.polyline_columns(&top, 1.0, &mut outline_color);
+            ui.c.polyline_columns(&bottom, 1.0, &mut outline_color);
+        } else {
+            let ink = if palette == 1 { custom } else { ui.t.tx(0xb9bfc3) };
+            ui.c.fill_polygon(&polygon, ink.with_alpha(30));
+            let top: Vec<_> = segment.iter().map(|&(x, y, _, _)| (x, y)).collect();
+            let bottom: Vec<_> = segment.iter().map(|&(x, _, y, _)| (x, y)).collect();
+            ui.c.polyline(&top, 1.0, ink.with_alpha(240));
+            ui.c.polyline(&bottom, 1.0, ink.with_alpha(240));
+        }
+    };
     for (c, &(lo, hi)) in s.scroll.cols.iter().enumerate() {
         let at = s.scroll.from + (s.scroll.visible as f64 * (c as f64 + 0.5) / s.scroll.cols.len().max(1) as f64) as u64;
         if (lo, hi) == (0.0, 0.0) && !(s.scroll.have.0..s.scroll.have.1).contains(&at) {
+            paint_segment(ui, &segment, palette);
+            segment.clear();
             continue;
         }
         let (lo, hi) = (lo.clamp(-1.0, 1.0), hi.clamp(-1.0, 1.0));
         let y0 = mid - hi * amp;
         let y1 = mid - lo * amp;
-        if palette == 2 {
-            let hue = spectrum_hue(c, s.scroll.cols.len());
-            let fill = spectrum_color(hue, 0.30);
-            let outline = spectrum_color(hue, 0.94);
-            let top = y0.min(y1);
-            let height = (y1 - y0).abs().max(1.0);
-            ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, height), fill);
-            ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, 1.0), outline);
-            if height > 1.0 {
-                ui.c.fill_cell(Rect::new(wv.x + c as f32, top + height - 1.0, 1.0, 1.0), outline);
-            }
-            continue;
-        }
-        let ink = if palette == 1 {
-            custom
-        } else {
-            ui.t.tx(0xb9bfc3)
-        };
-        let fill = ink.with_alpha(30);
-        let outline = ink.with_alpha(240);
-        let top = y0.min(y1);
-        let height = (y1 - y0).abs().max(1.0);
-        ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, height), fill);
-        ui.c.fill_cell(Rect::new(wv.x + c as f32, top, 1.0, 1.0), outline);
-        if height > 1.0 {
-            ui.c.fill_cell(Rect::new(wv.x + c as f32, top + height - 1.0, 1.0, 1.0), outline);
-        }
+        segment.push((wv.x + c as f32 + 0.5, y0.min(y1), y0.max(y1), c));
     }
+    paint_segment(ui, &segment, palette);
     // Paused (a Ctrl+click on the wave): the newest audio is not taken while it stands.
     if s.scroll.paused {
         let text = "Paused";
