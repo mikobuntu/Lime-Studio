@@ -734,6 +734,13 @@ impl Transport {
         let _ = self.tx.send(Cmd::Update);
     }
 
+    /// Rebuild playback from the complete project, including session-only clip effects whose schedules cannot be
+    /// changed through the lightweight channel and mixer edits.
+    pub fn refresh(&self, project: &Project) {
+        self.forget_sent();
+        self.update(project);
+    }
+
     /// Play pattern 1 of `project` once (a one-note preview project), on the previews' stream.
     pub fn preview(&self, project: Project) {
         let _ = self.tx.send(Cmd::Preview(Box::new(project)));

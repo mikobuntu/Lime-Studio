@@ -30,6 +30,8 @@ pub const PICK_ROW_MAX: f32 = 200.0;
 pub const ROW_MIN: f32 = 16.0;
 pub const ROW_MAX: f32 = 280.0;
 pub const ROW_STEP: f32 = 6.0;
+/// Maximum horizontal zoom: pixels per four-quarter-note reference bar.
+pub const MAX_BAR_W: f32 = 2400.0;
 /// Title strip of a clip incl. its top border (spec: ui/playlist.md §2).
 pub const TITLE_H: f32 = 15.0;
 /// Marker lane under the ruler, when the arrangement has time markers (§1).
@@ -315,6 +317,9 @@ pub enum Cmd {
     ClipRandomColor(usize),
     ClipPreview(usize),
     ClipHalftime(usize, u8),
+    ClipGate(usize, u8),
+    ClipShuffle(usize, u8),
+    ClipTape(usize, bool),
     /// A picker item's menu (§10a) on an audio or automation clip source: the command and the source's channel index.
     Pick(PickCmd, u16),
     PointDelete(u16, usize),
@@ -677,6 +682,11 @@ pub struct PlaylistState {
     pub hover_clip: Option<usize>,
     /// The audio clip handle under the mouse (drawn highlighted).
     pub hover_handle: Option<Handle>,
+    /// Session-only gated-volume POC state, keyed by the current clip index.
+    pub gated_volume: HashMap<usize, GateState>,
+    /// Session-only Shuffler state, keyed by clip index.
+    pub shuffler: HashMap<usize, ShuffleState>,
+    pub tape: HashMap<usize, TapeState>,
     /// Where the arrangement name sits in the title bar (its rename box opens there).
     pub arr_anchor: (f32, f32),
     /// Stretch mode (Shift+M, §9b): resizing an audio clip stretches it; while a resize runs, how many beats each
@@ -826,6 +836,9 @@ impl Default for PlaylistState {
             zoom_back: None,
             hover_clip: None,
             hover_handle: None,
+            gated_volume: HashMap::new(),
+            shuffler: HashMap::new(),
+            tape: HashMap::new(),
             arr_anchor: (300.0, 90.0),
             stretch: false,
             stretch_base: Vec::new(),
@@ -845,6 +858,43 @@ impl Default for PlaylistState {
             icons: HashMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GateState {
+    pub divisor: u8,
+    pub mask: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShuffleState {
+    pub divisor: u8,
+    pub order: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TapeState {
+    pub start_ms: f32,
+    pub stop_ms: f32,
+    pub start_curve: f32,
+    pub stop_curve: f32,
+}
+
+impl GateState {
+    pub fn new(divisor: u8) -> Self {
+        Self { divisor, mask: alternating_gate_mask(divisor) }
+    }
+
+    pub fn is_on(self, segment: usize) -> bool {
+        self.mask & (1u64 << segment) != 0
+    }
+}
+
+/// Start a newly enabled gate with alternating musical cells: on, off, on, off.
+fn alternating_gate_mask(divisor: u8) -> u64 {
+    (0..usize::from(divisor.min(64)))
+        .filter(|segment| segment % 2 == 0)
+        .fold(0, |mask, segment| mask | (1u64 << segment))
 }
 
 impl PlaylistState {
@@ -1914,7 +1964,7 @@ pub fn load_view(s: &mut State) {
     s.playlist.row_h = (v.row_px() as f32).clamp(ROW_MIN, ROW_MAX);
     let tpp = v.ticks_per_px();
     if tpp.is_finite() && tpp > 0.0 {
-        s.playlist_bar_w = (f64::from(ref_bar(s)) / tpp).clamp(4.0, 600.0) as f32;
+        s.playlist_bar_w = (f64::from(ref_bar(s)) / tpp).clamp(4.0, f64::from(MAX_BAR_W)) as f32;
         let left = v.left();
         let tpp = f64::from(ref_bar(s)) / f64::from(s.playlist_bar_w);
         s.playlist_scroll.0 = if left.is_finite() { (left / tpp).max(0.0) as f32 } else { 0.0 };
@@ -2370,14 +2420,40 @@ pub fn make_unique_audio(s: &mut State, i: usize) -> Option<String> {
 /// Make unique as sample on an audio clip: the clip as it sounds alone (its part of the sample, fades, gain and the
 /// channel's settings) is rendered to a new WAV file beside the project (`Rendered/`, as Consolidate), with a channel of
 /// its own; the clip plays all of it from then on, with no trims, fades or gain of its own. One undo step.
-pub fn make_unique_sample(s: &mut State, i: usize) -> String {
+pub fn make_unique_sample(app: &mut crate::app::App, i: usize, copy_label: &str) -> String {
+    let live_state = app
+        .state
+        .project
+        .arrangement()
+        .and_then(|a| a.clips.get(i))
+        .and_then(|c| match c.source {
+            ClipSource::Channel(ch) => app.state.project.channels.iter().position(|x| x.index == ch),
+            _ => None,
+        })
+        .and_then(|row| app.plugins.state(row));
+    let s = &mut app.state;
     let Some(c) = clips(s).get(i).copied() else { return "Make unique as sample: no clip".into() };
     let ClipSource::Channel(ch) = c.source else { return "Make unique as sample: not an audio clip".into() };
     let Some(row) = s.project.channels.iter().position(|x| x.index == ch) else { return "Make unique as sample: the clip's channel is gone".into() };
+    if let Some(state) = live_state.as_deref() {
+        crate::plugins::store_sampler(&mut s.project.channels[row], state);
+    }
     // The clip alone, at the start of a playing track; a fade the automatic crossfades derived from its neighbours
     // (no handle bit) is theirs, not the clip's.
     let mut p = s.project.clone();
     p.tempo = Some(s.tempo);
+    crate::rack::apply_clip_effects(s, &mut p);
+    p.gated_volume.iter_mut().for_each(|gate| {
+        if gate.clip == i {
+            gate.clip = 0;
+        } else {
+            gate.mask = 0;
+        }
+    });
+    p.shuffler.retain(|shuffle| shuffle.clip == i);
+    if let Some(shuffle) = p.shuffler.first_mut() {
+        shuffle.clip = 0;
+    }
     let mut alone = c;
     alone.position = 0;
     alone.track = 0;
@@ -2395,9 +2471,34 @@ pub fn make_unique_sample(s: &mut State, i: usize) -> String {
         }
     }
     let rate = 44100;
+    let channel = &s.project.channels[row];
+    let Some(path) = channel.sample_path.clone().filter(|p| !p.trim().is_empty()) else { return "Make unique as sample: the audio source is missing".into() };
+    let source = std::path::Path::new(&path);
+    let raw = match os_engine::sample::load(source) {
+        Ok(raw) => raw,
+        Err(e) => return format!("Make unique as sample: {e}"),
+    };
+    let (_, source_info) = lemon_sampler::source_info(source);
+    let key = lemon_sampler::params::FxKey { fx: channel.sound.fx, knob_loop: None, rate, stretch: false, ratio: 1.0, time: 0.0, shift: 0.0 };
+    let processed = lemon_sampler::fx::build(&raw, &source_info, &key).sample;
+    let processed_path = std::env::temp_dir().join(format!("lemon-studio-bounce-{}-{}.wav", std::process::id(), i));
+    let processed_frames = processed.left.iter().zip(&processed.right).flat_map(|(&l, &r)| [l, r]).collect::<Vec<_>>();
+    let written = std::fs::File::create(&processed_path).and_then(|f| {
+        let mut w = std::io::BufWriter::new(f);
+        os_engine::wav::write_f32_stereo(&mut w, processed.rate, &processed_frames)
+    });
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&processed_path);
+        return format!("Make unique as sample: {e}");
+    }
+    if let Some(channel) = p.channels.iter_mut().find(|x| x.index == ch) {
+        channel.sample_path = Some(processed_path.to_string_lossy().into_owned());
+        channel.sound.fx = os_model::SampleFx::default();
+    }
     let mut lib = os_engine::SampleLibrary::new(crate::factory_folder::dir());
     let mut e = os_engine::Engine::new(&p, &mut lib, rate, os_engine::PlayMode::Song);
     let mut audio = e.render_all(512);
+    let _ = std::fs::remove_file(&processed_path);
     let want = (os_engine::laws::tick_to_frame(f64::from(c.length), p.ppq, p.tick_tempo(s.tempo), rate) as usize) * 2;
     audio.resize(want.max(2), 0.0);
     let dir = s.path.as_ref().and_then(|p| p.parent()).map(|d| d.join("Rendered")).unwrap_or_else(|| std::env::temp_dir().join("Lemon Studio").join("Rendered"));
@@ -2405,7 +2506,7 @@ pub fn make_unique_sample(s: &mut State, i: usize) -> String {
         return format!("Make unique as sample: {e}");
     }
     let base: String = crate::rack::channel_name(s, row).chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
-    let file = (1..).map(|k| dir.join(if k == 1 { format!("{base} (unique).wav") } else { format!("{base} (unique {k}).wav") })).find(|f| !f.exists()).expect("unbounded");
+    let file = (1..).map(|k| dir.join(format!("{base} ({copy_label} {k:03}).wav"))).find(|f| !f.exists()).expect("unbounded");
     let written = std::fs::File::create(&file).and_then(|f| {
         let mut w = std::io::BufWriter::new(f);
         os_engine::wav::write_f32_stereo(&mut w, rate, &audio)
@@ -2438,13 +2539,17 @@ pub fn make_unique_sample(s: &mut State, i: usize) -> String {
         cl.set_fade_in_tension(0.0);
         cl.set_fade_out_tension(0.0);
     }
+    s.playlist.gated_volume.remove(&i);
+    s.playlist.shuffler.remove(&i);
+    s.playlist.tape.remove(&i);
     s.playlist.source = Some(ClipSource::Channel(index));
     s.piano.dirty = true;
     format!("Made unique as sample: {}", file.display())
 }
 
 /// Render an audio clip in place, rejecting inputs that cannot be decoded instead of silently rendering a fallback.
-fn bounce_in_place(s: &mut State, i: usize) -> String {
+fn bounce_in_place(app: &mut crate::app::App, i: usize) -> String {
+    let s = &app.state;
     let Some(c) = clips(s).get(i).copied() else { return "Bounce in place: no clip".into() };
     let ClipSource::Channel(ch) = c.source else { return "Bounce in place: not an audio clip".into() };
     let Some(channel) = s.project.channels.iter().find(|x| x.index == ch) else { return "Bounce in place: the clip's channel is gone".into() };
@@ -2454,7 +2559,7 @@ fn bounce_in_place(s: &mut State, i: usize) -> String {
     if s.playlist.wave(&path).is_none() {
         return "Bounce in place: the audio source cannot be decoded".into();
     }
-    make_unique_sample(s, i).replace("Make unique as sample", "Bounce in place").replace("Made unique as sample", "Bounced in place")
+    make_unique_sample(app, i, "bounce").replace("Make unique as sample", "Bounce in place").replace("Made unique as sample", "Bounced in place")
 }
 
 /// First track at or below `from` with no clips overlapping `[a, b)`.
@@ -3052,11 +3157,43 @@ pub fn clip_menu(s: &State, i: usize, x: f32, y: f32) -> Popup {
             items.push(PItem::new("Make unique", Cmd::ClipUnique(i)));
         }
         PickKind::Audio => {
-            items.extend([
-                PItem::head("Clip effects"),
-                PItem::new("Bounce in place", Cmd::ClipBounce(i)),
-                PItem::sep(),
-                PItem::sub(
+                items.extend([
+                    PItem::head("Clip effects"),
+                    PItem::new("Bounce in place", Cmd::ClipBounce(i)),
+                    PItem::sep(),
+                    PItem::sub(
+                        "Shuffler",
+                        [
+                            ("Off", 0), ("1/128", 128), ("1/64", 64), ("1/32", 32),
+                            ("1/16", 16), ("1/8", 8), ("1/4", 4), ("1/2", 2),
+                        ].into_iter().map(|(label, divisor)| PItem::new(label, Cmd::ClipShuffle(i, divisor))).collect(),
+                    ),
+                    PItem::new("Shuffle now", Cmd::ClipShuffle(i, 255)),
+                    PItem::sep(),
+                    PItem::new("Tape start/stop", Cmd::ClipTape(i, !s.playlist.tape.contains_key(&i))).mark(Mark::Check(s.playlist.tape.contains_key(&i))),
+                    PItem::sep(),
+                    PItem::sub(
+                        "Gated volume",
+                        [
+                            ("Off", 0),
+                            ("1/64", 64),
+                            ("1/32", 32),
+                            ("1/16", 16),
+                            ("1/8", 8),
+                            ("1/4", 4),
+                            ("1/2", 2),
+                        ]
+                        .into_iter()
+                        .map(|(label, divisor)| {
+                            PItem::new(label, Cmd::ClipGate(i, divisor)).mark(Mark::Radio(
+                                (divisor == 0 && !s.playlist.gated_volume.contains_key(&i))
+                                    || s.playlist.gated_volume.get(&i).is_some_and(|g| divisor as u8 == g.divisor),
+                            ))
+                        })
+                        .collect(),
+                    ),
+                    PItem::sep(),
+                    PItem::sub(
                     "Lo-Fi",
                     vec![
                         PItem::new("Off", Cmd::ClipLofi(i, 10)).mark(Mark::Radio(c.effect() == os_model::ClipEffect::None)),
@@ -3429,6 +3566,8 @@ pub enum PlDrag {
     Tension { ch: u16, i: usize, y0: f32, t0: f32 },
     /// An audio clip's fade-in (`out` false) or fade-out handle (§9a).
     Fade { clip: usize, out: bool },
+    Tape { clip: usize, out: bool },
+    TapeCurve { clip: usize, out: bool, y0: f32, curve0: f32 },
     FadeTension { clip: usize, out: bool, y0: f32, t0: f32 },
     /// An audio clip's gain handle: dB from where the drag started.
     Gain { clip: usize, y0: f32, db0: f32 },
@@ -3441,6 +3580,10 @@ pub enum PlDrag {
 pub enum Handle {
     FadeIn,
     FadeOut,
+    TapeStop,
+    TapeStart,
+    TapeTensionStart,
+    TapeTensionStop,
     TensionIn,
     TensionOut,
     Gain,
@@ -3564,6 +3707,18 @@ pub fn handle_at(s: &State, g: &PGeom, i: usize, x: f32, y: f32) -> Option<Handl
     if near(fx_out - 3.0, body.y + 3.0, 5.0) {
         return Some(Handle::FadeOut);
     }
+    if let Some(tape) = s.playlist.tape.get(&i) {
+        let start = body.x + ms_px(s, g, tape.start_ms).min(body.w);
+        let stop = body.right() - ms_px(s, g, tape.stop_ms).min(body.w);
+        let start_mid = (body.x + start) / 2.0;
+        let start_mid_y = body.bottom() - (0.5f64.powf(f64::from(tape.start_curve)) as f32) * body.h;
+        let stop_mid = (stop + body.right()) / 2.0;
+        let stop_mid_y = body.bottom() - (0.5f64.powf(f64::from(tape.stop_curve)) as f32) * body.h;
+        if start - body.x > 10.0 && near(start_mid, start_mid_y, 5.0) { return Some(Handle::TapeTensionStart); }
+        if body.right() - stop > 10.0 && near(stop_mid, stop_mid_y, 5.0) { return Some(Handle::TapeTensionStop); }
+        if near(start, body.y + 3.0, 5.0) { return Some(Handle::TapeStart); }
+        if near(stop, body.y + 3.0, 5.0) { return Some(Handle::TapeStop); }
+    }
     if near(body.cx(), body.bottom() - 2.0, 6.0) {
         return Some(Handle::Gain);
     }
@@ -3575,11 +3730,25 @@ pub fn handle_hint(c: &Clip, h: Handle) -> String {
     match h {
         Handle::FadeIn => format!("Fade in: {:.0} ms", c.stored_fade_in().map_or(0.0, |f| f.0)),
         Handle::FadeOut => format!("Fade out: {:.0} ms", c.stored_fade_out().map_or(0.0, |f| f.0)),
+        Handle::TapeStop => "Tape stop".into(),
+        Handle::TapeStart => "Tape start".into(),
+        Handle::TapeTensionStart => "Tape start curve".into(),
+        Handle::TapeTensionStop => "Tape stop curve".into(),
         Handle::TensionIn => format!("Fade in tension: {:+.2}", c.fade_in_tension()),
         Handle::TensionOut => format!("Fade out tension: {:+.2}", c.fade_out_tension()),
         Handle::Gain => format!("Clip gain: {:+.1} dB", 20.0 * c.gain().log10()),
         Handle::Crossfade => format!("Crossfade tension: {:+.2}", c.fade_in_tension()),
     }
+}
+
+pub fn gate_segment(s: &State, i: usize, x: f32, y: f32, g: &PGeom) -> Option<usize> {
+    let c = clips(s).get(i)?;
+    let gate = s.playlist.gated_volume.get(&i)?;
+    if !is_audio_clip(s, g, c) || !g.body(c).contains(x, y) {
+        return None;
+    }
+    let unit = (g.ppq * 4 / u32::from(gate.divisor.max(1))).max(1);
+    Some((g.tick_at(x).max(0.0) / unit as f32).floor() as usize % usize::from(gate.divisor.max(1)))
 }
 
 /// Edge of a clip under x: -1 left, 1 right, 0 body.
@@ -3635,6 +3804,10 @@ pub fn press_grid(app: &mut App, grid: Rect, right: bool) {
             app.drag = Some(Drag::Pl(match h {
                 Handle::FadeIn => PlDrag::Fade { clip: ci, out: false },
                 Handle::FadeOut => PlDrag::Fade { clip: ci, out: true },
+                Handle::TapeStart => PlDrag::Tape { clip: ci, out: false },
+                Handle::TapeStop => PlDrag::Tape { clip: ci, out: true },
+                Handle::TapeTensionStart => PlDrag::TapeCurve { clip: ci, out: false, y0: y, curve0: s.playlist.tape.get(&ci).map_or(1.0, |t| t.start_curve) },
+                Handle::TapeTensionStop => PlDrag::TapeCurve { clip: ci, out: true, y0: y, curve0: s.playlist.tape.get(&ci).map_or(1.0, |t| t.stop_curve) },
                 Handle::TensionIn => PlDrag::FadeTension { clip: ci, out: false, y0: y, t0: c.fade_in_tension() },
                 Handle::TensionOut => PlDrag::FadeTension { clip: ci, out: true, y0: y, t0: c.fade_out_tension() },
                 Handle::Gain => PlDrag::Gain { clip: ci, y0: y, db0: 20.0 * c.gain().log10() },
@@ -3644,6 +3817,13 @@ pub fn press_grid(app: &mut App, grid: Rect, right: bool) {
                 }
             }));
             app.hint = Cow::Owned(handle_hint(&c, h));
+            app.invalidate();
+            return;
+        }
+        if let Some(segment) = gate_segment(s, ci, x, y, &g) {
+            let gate = s.playlist.gated_volume.entry(ci).or_insert_with(|| GateState::new(8));
+            gate.mask ^= 1u64 << segment;
+            app.hint = Cow::Borrowed("Gated volume segment");
             app.invalidate();
             return;
         }
@@ -3975,12 +4155,13 @@ pub fn drag_move(app: &mut App, d: PlDrag, grid: Rect) {
     // tension or gain handle only that clip (and the hint bar). A stretch-mode resize changes every clip of the
     // stretched channels: the whole window.
     let stretching = !app.state.playlist.stretch_base.is_empty() && matches!(d, PlDrag::ResizeL { .. } | PlDrag::ResizeR { .. });
-    let handle = matches!(d, PlDrag::Fade { .. } | PlDrag::FadeTension { .. } | PlDrag::Gain { .. } | PlDrag::Crossfade { .. });
+    let handle = matches!(d, PlDrag::Fade { .. } | PlDrag::Tape { .. } | PlDrag::TapeCurve { .. } | PlDrag::FadeTension { .. } | PlDrag::Gain { .. } | PlDrag::Crossfade { .. });
     let moved: Option<Vec<usize>> = match &d {
         _ if stretching => None,
         PlDrag::Move { orig, .. } | PlDrag::ResizeL { orig, .. } | PlDrag::ResizeR { orig, .. } => Some(orig.iter().map(|&(i, _)| i).collect()),
         PlDrag::Slip { i, .. } => Some(vec![*i]),
         PlDrag::Fade { clip, .. } | PlDrag::FadeTension { clip, .. } | PlDrag::Gain { clip, .. } => Some(vec![*clip]),
+        PlDrag::Tape { clip, .. } | PlDrag::TapeCurve { clip, .. } => Some(vec![*clip]),
         PlDrag::Crossfade { a, b, .. } => Some(vec![*a, *b]),
         _ => None,
     };
@@ -4177,6 +4358,24 @@ pub fn drag_move(app: &mut App, d: PlDrag, grid: Rect) {
             app.hint = Cow::Owned(handle_hint(&c, if out { Handle::FadeOut } else { Handle::FadeIn }));
             app.state.piano.dirty = true;
         }
+        PlDrag::Tape { clip, out } => {
+            let Some(c) = clips(s).get(clip).copied() else { return };
+            let body = g.body(&c);
+            let px = if out { (body.right() - x).max(0.0) } else { (x - body.x).max(0.0) };
+            let ms = (f64::from(px / g.ppt) * fade_ms_per_tick(s)).clamp(0.0, 5000.0) as f32;
+            let tape = s.playlist.tape.entry(clip).or_insert(TapeState { start_ms: 250.0, stop_ms: 250.0, start_curve: 1.0, stop_curve: 1.0 });
+            if out { tape.stop_ms = ms; } else { tape.start_ms = ms; }
+            app.hint = Cow::Owned(format!("Tape {}: {ms:.0} ms", if out { "stop" } else { "start" }));
+            app.state.piano.dirty = true;
+        }
+        PlDrag::TapeCurve { clip, out, y0, curve0 } => {
+            if let Some(tape) = s.playlist.tape.get_mut(&clip) {
+                let curve = (curve0 + (y0 - y) / 80.0).clamp(0.1, 8.0);
+                if out { tape.stop_curve = curve; } else { tape.start_curve = curve; }
+                app.hint = Cow::Owned(format!("Tape {} curve: {curve:.2}", if out { "stop" } else { "start" }));
+            }
+            app.state.piano.dirty = true;
+        }
         PlDrag::FadeTension { clip, out, y0, t0 } => {
             let t = (t0 + (y0 - y) * TENSION_PER_PX).clamp(-40.0, 40.0);
             let c = &mut arr_mut(s).clips[clip];
@@ -4215,6 +4414,9 @@ pub fn drag_move(app: &mut App, d: PlDrag, grid: Rect) {
         }
     }
     let glided = clips_jumped(&app.state, &g, grid, alt, glide_from);
+    if handle {
+        app.transport.refresh(&crate::rack::play_project(&app.state));
+    }
     match (moved, before) {
         (Some(idx), Some(mut dirty)) => {
             dirty.extend(rects(&app.state, &idx));
@@ -4346,11 +4548,11 @@ fn zoom_to(app: &mut App, grid: Rect, x0: f32, y0: f32) {
     let bar = (g.ppq * 4) as f32;
     if (x1 - x0).abs() < 4.0 {
         let t = g.tick_at(x1);
-        s.playlist_bar_w = (s.playlist_bar_w * 2.0).min(600.0);
+        s.playlist_bar_w = (s.playlist_bar_w * 2.0).min(MAX_BAR_W);
         s.playlist_scroll.0 = (t / bar * s.playlist_bar_w - (x1 - grid.x)).max(0.0);
     } else {
         let (t0, t1) = (g.tick_at(x0.min(x1)).max(0.0), g.tick_at(x0.max(x1)).max(0.0));
-        s.playlist_bar_w = (grid.w / ((t1 - t0).max(1.0) / bar)).clamp(4.0, 600.0);
+        s.playlist_bar_w = (grid.w / ((t1 - t0).max(1.0) / bar)).clamp(4.0, MAX_BAR_W);
         s.playlist_scroll.0 = t0 / bar * s.playlist_bar_w;
         s.playlist_scroll.1 = (s.playlist_scroll.1 + y0.min(y1) - grid.y).max(0.0);
     }
@@ -4378,7 +4580,7 @@ pub fn zoom_on(s: &mut State, grid: (f32, f32), idx: &[usize]) {
     let (Some(a), Some(b)) = (cs.iter().map(|c| c.position).min(), cs.iter().map(|c| c.end()).max()) else { return };
     let bar = ref_bar(s) as f32;
     let span = ((b - a) as f32 / bar).max(1.0);
-    s.playlist_bar_w = (grid.0 / span).clamp(4.0, 600.0);
+    s.playlist_bar_w = (grid.0 / span).clamp(4.0, MAX_BAR_W);
     s.playlist_scroll.0 = a as f32 / bar * s.playlist_bar_w;
     let top = cs.iter().map(|c| c.track).min().unwrap_or(0);
     // The selected tracks fill the view's height, on FL's 2 px height steps (§5; FL measured only at the maximum).
@@ -4725,6 +4927,7 @@ pub fn commit_edit(s: &mut State) {
 /// Run a menu / shortcut command. Returns a status message, if any.
 pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
     let grid = app.pl_grid();
+    let refresh_shuffle = matches!(&cmd, Cmd::ClipShuffle(..) | Cmd::ClipTape(..));
     let was = app.state.playlist.popup.take();
     // Commands that need the whole app.
     match cmd {
@@ -5177,7 +5380,7 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
         Cmd::ZoomIn | Cmd::ZoomOut => {
             let k = if cmd == Cmd::ZoomIn { 1.25 } else { 0.8 };
             let center = (s.playlist_scroll.0 + grid_w / 2.0) / s.playlist_bar_w;
-            s.playlist_bar_w = (s.playlist_bar_w * k).clamp(4.0, 600.0);
+            s.playlist_bar_w = (s.playlist_bar_w * k).clamp(4.0, MAX_BAR_W);
             s.playlist_scroll.0 = (center * s.playlist_bar_w - grid_w / 2.0).max(0.0);
             None
         }
@@ -5305,6 +5508,60 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
             s.piano.dirty = true;
             None
         }
+        Cmd::ClipGate(i, divisor) => {
+            if divisor == 0 {
+                s.playlist.gated_volume.remove(&i);
+            } else if matches!(divisor, 2 | 4 | 8 | 16 | 32 | 64) {
+                let old = s.playlist.gated_volume.get(&i).copied();
+                let mask = old.map_or_else(|| alternating_gate_mask(divisor), |g| if g.divisor == divisor { g.mask } else { alternating_gate_mask(divisor) });
+                s.playlist.gated_volume.insert(i, GateState { divisor, mask });
+            } else {
+                return Some("Gated volume: unsupported divisor".into());
+            }
+            s.piano.dirty = true;
+            None
+        }
+        Cmd::ClipShuffle(i, divisor) => {
+            let Some(c) = clips(s).get(i).copied() else { return None };
+            if source_kind(s, c.source) != PickKind::Audio { return None }
+            if divisor == 0 {
+                s.playlist.shuffler.remove(&i);
+                s.piano.dirty = true;
+            } else {
+                let shuffle_now = divisor == 255;
+                let divisor = if shuffle_now { s.playlist.shuffler.get(&i).map_or(8, |state| state.divisor) } else { divisor };
+                if !matches!(divisor, 2 | 4 | 8 | 16 | 32 | 64 | 128) { return Some("Shuffler: unsupported divisor".into()) }
+                let current = s.playlist.shuffler.get(&i).filter(|state| state.divisor == divisor);
+                if !shuffle_now {
+                    let order = current.map_or_else(|| (0..divisor).collect(), |state| state.order.clone());
+                    s.playlist.shuffler.insert(i, ShuffleState { divisor, order });
+                    s.piano.dirty = true;
+                } else {
+                    let mut order: Vec<u8> = (0..divisor).collect();
+                    let previous = s.playlist.shuffler.get(&i).filter(|state| state.divisor == divisor).map(|state| state.order.clone());
+                    let mut seed = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64)) ^ i as u64;
+                    for n in (1..order.len()).rev() {
+                        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+                        order.swap(n, (seed as usize) % (n + 1));
+                    }
+                    if previous.as_ref().is_some_and(|old| old == &order) && order.len() > 1 {
+                        order.swap(0, 1);
+                    }
+                    s.playlist.shuffler.insert(i, ShuffleState { divisor, order });
+                }
+            }
+            s.piano.dirty = true;
+            None
+        }
+        Cmd::ClipTape(i, on) => {
+            if on {
+                s.playlist.tape.insert(i, TapeState { start_ms: 250.0, stop_ms: 250.0, start_curve: 1.0, stop_curve: 1.0 });
+            } else {
+                s.playlist.tape.remove(&i);
+            }
+            s.piano.dirty = true;
+            None
+        }
         Cmd::ClipDelete(i) => {
             snapshot(s);
             delete(s, vec![i]);
@@ -5315,8 +5572,8 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
             snapshot(s);
             make_unique(s, i).map(|n| format!("Made unique: pattern {n}"))
         }
-        Cmd::ClipUniqueSample(i) => Some(make_unique_sample(s, i)),
-        Cmd::ClipBounce(i) => Some(bounce_in_place(s, i)),
+        Cmd::ClipUniqueSample(i) => Some(make_unique_sample(app, i, "copy")),
+        Cmd::ClipBounce(i) => Some(bounce_in_place(app, i)),
         Cmd::ClipLofi(i, model) => {
             let effect = if model == 10 { os_model::ClipEffect::None } else { os_model::ClipEffect::lofi(model).unwrap_or(os_model::ClipEffect::None) };
             if !matches!(clips(s).get(i).map(|c| (c.source, c.effect())), Some((ClipSource::Channel(ch), old)) if source_kind(s, ClipSource::Channel(ch)) == PickKind::Audio && old != effect) {
@@ -5618,6 +5875,9 @@ pub fn run(app: &mut App, cmd: Cmd) -> Option<String> {
         Cmd::Messages(_) => None,
         Cmd::DataFolder(_) => None,
     };
+    if refresh_shuffle {
+        app.transport.refresh(&crate::rack::play_project(&app.state));
+    }
     app.invalidate();
     msg
 }
