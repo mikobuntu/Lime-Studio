@@ -206,12 +206,22 @@ struct ClipShape {
     gain: f32,
     /// Frames of the short fade a late start begins with (0 = none).
     declick: u64,
+    /// Beat-relative gated-volume POC: grid unit in frames, phase cell, and enabled-cell mask.
+    gate: Option<(u64, u64, u64, u8)>,
+    /// Session-only clip slice order: segment count and source segment for each destination segment.
+    shuffle: Option<(u8, [u8; 128])>,
+    tape: Option<(u64, u64, f64, f64)>,
 }
 
 impl ClipShape {
     /// The gain `age` frames after the voice started.
     fn at(&self, age: u64) -> f32 {
         let t = self.since + age;
+        if let Some((_, stop_duration, _, _)) = self.tape {
+            if stop_duration > 0 && t >= self.total {
+                return 0.0;
+            }
+        }
         let mut g = f64::from(self.gain);
         if self.fade_in > 0 && t < self.fade_in {
             g *= os_model::fade_curve(t as f64 / self.fade_in as f64, self.tension_in);
@@ -225,8 +235,55 @@ impl ClipShape {
         if self.declick > 0 && age < self.declick {
             g *= os_model::fade_curve(age as f64 / self.declick as f64, 0.0);
         }
+        if let Some((unit, mask, phase, divisor)) = self.gate {
+            let segment = (phase + t / unit.max(1)) % u64::from(divisor.max(1));
+            if mask & (1u64 << segment) == 0 {
+                return 0.0;
+            }
+        }
         g as f32
     }
+
+    fn shuffled_age(&self, age: u64) -> u64 {
+        let Some((divisor, order)) = self.shuffle else { return age };
+        let divisor = u64::from(divisor.max(1));
+        let segment = (age.saturating_mul(divisor) / self.total.max(1)).min(divisor - 1);
+        let segment_start = segment * self.total / divisor;
+        let segment_end = (segment + 1) * self.total / divisor;
+        let local = age.saturating_sub(segment_start);
+        let source_start = u64::from(order[segment as usize]) * self.total / divisor;
+        source_start + local.min(segment_end.saturating_sub(segment_start))
+    }
+
+    fn source_age(&self, age: u64) -> u64 {
+        let age = if let Some((start_duration, stop_duration, start_curve, stop_curve)) = self.tape {
+            let start_duration = start_duration.min(self.total);
+            let stop_duration = stop_duration.min(self.total);
+            let x = age.min(self.total) as f64;
+            let start_p = start_curve.max(0.1);
+            let stop_p = stop_curve.max(0.1);
+            let start_distance = start_duration as f64 / (start_p + 1.0);
+            let after_start = if start_duration == 0 {
+                x
+            } else if x < start_duration as f64 {
+                let t = x / start_duration as f64;
+                start_duration as f64 * t.powf(start_p + 1.0) / (start_p + 1.0)
+            } else {
+                x - start_duration as f64 + start_distance
+            };
+            let stop_start = self.total.saturating_sub(stop_duration) as f64;
+            let source = if stop_duration > 0 && x > stop_start {
+                let t = (x - stop_start) / stop_duration as f64;
+                let base = stop_start - start_duration as f64 + start_distance;
+                base + stop_duration as f64 * (1.0 - (1.0 - t).powf(stop_p + 1.0)) / (stop_p + 1.0)
+            } else {
+                after_start
+            };
+            source.round().clamp(0.0, self.total as f64) as u64
+        } else { age };
+        self.shuffled_age(age)
+    }
+
 }
 
 /// Frames of the fade-in a late start inside an audio clip begins with (a Lemon Studio choice, spec:
@@ -292,11 +349,14 @@ struct ClipFx {
     fade_in: (f32, f32),
     fade_out: (f32, f32),
     gain: f32,
+    gate: Option<(u8, u64)>,
+    shuffle: Option<(u8, [u8; 128])>,
+    tape: Option<(f32, f32, f32, f32)>,
 }
 
 impl ClipFx {
     fn of(c: &os_model::Clip, (fade_in, fade_out): (Option<(f32, f32)>, Option<(f32, f32)>)) -> Option<ClipFx> {
-        let fx = ClipFx { fade_in: fade_in.unwrap_or((0.0, 0.0)), fade_out: fade_out.unwrap_or((0.0, 0.0)), gain: c.gain() };
+        let fx = ClipFx { fade_in: fade_in.unwrap_or((0.0, 0.0)), fade_out: fade_out.unwrap_or((0.0, 0.0)), gain: c.gain(), gate: None, shuffle: None, tape: None };
         (fx.fade_in.0 > 0.0 || fx.fade_out.0 > 0.0 || fx.gain != 1.0).then_some(fx)
     }
 }
@@ -1600,6 +1660,14 @@ impl Engine {
                             tension_out: f64::from(fx.fade_out.1),
                             gain: fx.gain,
                             declick: 0,
+                            gate: fx.gate.map(|(divisor, mask)| {
+                                let unit_ticks = (u64::from(ppq.max(1)) * 4 / u64::from(divisor.max(1))).max(1);
+                                let start_frame = Clock::frame_of_tick(rate, ppq, tick_tempo, n.tick);
+                                let next_frame = Clock::frame_of_tick(rate, ppq, tick_tempo, n.tick + unit_ticks);
+                                ((next_frame - start_frame).max(1), mask, u64::from(n.tick) / unit_ticks, divisor)
+                            }),
+                            shuffle: fx.shuffle,
+                            tape: fx.tape.map(|(start, stop, start_curve, stop_curve)| (ms(start), ms(stop), f64::from(start_curve), f64::from(stop_curve))),
                         }
                     }),
                     slide: n.slide,
@@ -2418,7 +2486,7 @@ impl Engine {
                 let since = at - frame(t.tick);
                 let from = t.from + since as f64 * t.rate * t.speed * ch.base_rate;
                 let total = t.cut.map_or(u64::MAX, |c| frame(c) - frame(t.tick));
-                let plain = ClipShape { since: 0, total, fade_in: 0, fade_out: 0, tension_in: 0.0, tension_out: 0.0, gain: 1.0, declick: 0 };
+                let plain = ClipShape { since: 0, total, fade_in: 0, fade_out: 0, tension_in: 0.0, tension_out: 0.0, gain: 1.0, declick: 0, gate: None, shuffle: None, tape: None };
                 let declick = (LATE_START_SECONDS * f64::from(self.rate)).round() as u64;
                 let shape = Some(ClipShape { since, declick, ..t.shape.unwrap_or(plain) });
                 (from < frames).then(|| Trigger { tick, from, start: (from / frames) as f32, shape, ..*t })
@@ -2635,6 +2703,9 @@ impl Engine {
                 .chain(&self.late)
                 .find(|trigger| trigger.origin() == origin);
             let Some(trigger) = trigger else { continue };
+            if voice.shape != trigger.shape {
+                voice.shape = trigger.shape;
+            }
             if voice.lofi != trigger.lofi {
                 voice.lofi = trigger.lofi;
                 voice.lofi_phase = 1.0;
@@ -4244,7 +4315,7 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
     let exact = step == 1.0 && v.pos.fract() == 0.0 && ch.pitch_env.is_none();
     let mut scale = step.max(1.0);
     let off_s = v.off.map(|o| o as f64 * ch.frame_s);
-    let mut pos = v.pos;
+        let mut pos = v.pos;
     for f in offset..end {
         if pos >= n as f64 {
             v.pos = pos;
@@ -4278,20 +4349,24 @@ fn render_voice_into(v: &mut Voice, channels: &[ChannelState], out: &mut [f32], 
                 *left as f32 / *len as f32
             }
         };
+        let source_pos = v.shape.map_or(pos, |shape| {
+            let local = shape.since.saturating_add(v.age);
+            pos + (shape.source_age(local) as f64 - local as f64) * step
+        }).min((n.saturating_sub(1)) as f64);
         let (mut l, mut r) = if exact {
-            let i = pos as usize;
+            let i = source_pos as usize;
             (s.left[i], s.right[i])
         } else if w <= 1.0 {
             // Linear (an export's 2-point resampling).
-            let i = pos as usize;
-            let (j, x) = ((i + 1).min(n - 1), (pos - i as f64) as f32);
+            let i = source_pos as usize;
+            let (j, x) = ((i + 1).min(n - 1), (source_pos - i as f64) as f32);
             (s.left[i] + (s.left[j] - s.left[i]) * x, s.right[i] + (s.right[j] - s.right[i]) * x)
         } else {
-            let i0 = (pos - w).ceil().max(0.0) as usize;
-            let i1 = ((pos + w).floor() as usize).min(n - 1);
+            let i0 = (source_pos - w).ceil().max(0.0) as usize;
+            let i1 = ((source_pos + w).floor() as usize).min(n - 1);
             let (mut l, mut r) = (0.0f64, 0.0f64);
             for i in i0..=i1 {
-                let t = i as f64 - pos;
+                let t = i as f64 - source_pos;
                 let k = sinc(t / scale) / scale * blackman(t, w);
                 l += f64::from(s.left[i]) * k;
                 r += f64::from(s.right[i]) * k;
@@ -5440,7 +5515,7 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
             }
             // spec: audio/audio-clips.md "Automatic crossfades"
             let fades = os_model::crossfade::playing(project, clips, project.tempo.unwrap_or(140.0));
-            for (c, &fx) in clips.iter().zip(&fades) {
+            for (clip_index, (c, &fx)) in clips.iter().zip(&fades).enumerate() {
                 let start = u64::from(c.position);
                 let effect = c.effect();
                 let speed = effect.speed();
@@ -5466,8 +5541,16 @@ fn schedule(project: &Project, mode: PlayMode, report: &mut EngineReport) -> (Ve
                         Some(ChannelKind::AudioClip | ChannelKind::Sampler) => {
                             let from_s = c.window.map_or(0.0, |w| w.0.max(0.0) / 1000.0);
                             let to_s = c.window.filter(|w| w.0 >= 0.0 && w.1 >= 0.0).map(|w| w.1 / 1000.0);
-                            let clip = ClipFx::of(c, fx).or_else(|| {
-                                lofi.map(|_| ClipFx { fade_in: (0.0, 0.0), fade_out: (0.0, 0.0), gain: 1.0 })
+                            let gate = project.gated_volume.iter().find(|gate| gate.clip == clip_index).map(|gate| (gate.divisor, gate.mask));
+                             let shuffle = project.shuffler.iter().find(|shuffle| shuffle.clip == clip_index).map(|shuffle| (shuffle.divisor, shuffle.order));
+                             let tape = project.tape.iter().find(|tape| tape.clip == clip_index).map(|tape| (tape.start_ms, tape.stop_ms, tape.start_curve, tape.stop_curve));
+                            let clip = ClipFx::of(c, fx).map(|mut clip| {
+                                clip.gate = gate;
+                                 clip.shuffle = shuffle;
+                                 clip.tape = tape;
+                                clip
+                            }).or_else(|| {
+                                (gate.is_some() || shuffle.is_some() || tape.is_some() || lofi.is_some()).then_some(ClipFx { fade_in: (0.0, 0.0), fade_out: (0.0, 0.0), gain: 1.0, gate, shuffle, tape })
                             });
                             out.push(Sched { tick: start, channel: usize::from(ch), key: 60, fine: 120, velocity: 100, pan: 64, mod_x: 128, mod_y: 128, cut: Some(start + len), len, speed, lofi, from_s, to_s, clip, slide: false, colour: 0, porta: false, swing: None });
                         }
@@ -5494,6 +5577,127 @@ mod tests {
         assert!((speed_pitch_semitones(0.5) + 12.0).abs() < 1e-6);
         assert!((speed_pitch_semitones(0.25) + 24.0).abs() < 1e-6);
         assert!((speed_pitch_semitones(0.125) + 36.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gated_clip_shape_mutes_disabled_beat_cells() {
+        let shape = ClipShape {
+            since: 0,
+            total: 384,
+            fade_in: 0,
+            fade_out: 0,
+            tension_in: 0.0,
+            tension_out: 0.0,
+            gain: 1.0,
+            declick: 0,
+            gate: Some((48, 0b1010, 0, 4)),
+            shuffle: None,
+            tape: None,
+        };
+        assert_eq!(shape.at(0), 0.0);
+        assert_eq!(shape.at(48), 1.0);
+        assert_eq!(shape.at(96), 0.0);
+        assert_eq!(shape.at(144), 1.0);
+    }
+
+    #[test]
+    fn shuffled_clip_shape_allocates_each_segment_once() {
+        let mut order = [0u8; 128];
+        order[..4].copy_from_slice(&[2, 0, 3, 1]);
+        let shape = ClipShape {
+            since: 0,
+            total: 400,
+            fade_in: 0,
+            fade_out: 0,
+            tension_in: 0.0,
+            tension_out: 0.0,
+            gain: 1.0,
+            declick: 0,
+            gate: None,
+            shuffle: Some((4, order)), tape: None,
+        };
+        let starts = [0, 100, 200, 300].map(|age| shape.shuffled_age(age));
+        assert_eq!(starts, [200, 0, 300, 100]);
+    }
+
+    #[test]
+    fn tape_stop_keeps_normal_rate_then_slows() {
+        let shape = ClipShape {
+            since: 0,
+            total: 1000,
+            fade_in: 0,
+            fade_out: 0,
+            tension_in: 0.0,
+            tension_out: 0.0,
+            gain: 1.0,
+            declick: 0,
+            gate: None,
+            shuffle: None,
+            tape: Some((0, 200, 1.0, 1.0)),
+        };
+        assert_eq!(shape.source_age(0), 0);
+        assert_eq!(shape.source_age(200), 200);
+        assert_eq!(shape.source_age(500), 500);
+        assert_eq!(shape.source_age(800), 800);
+        assert_eq!(shape.source_age(1000), 900);
+    }
+
+    #[test]
+    fn tape_stop_reaches_zero_rate_at_end() {
+        let shape = ClipShape {
+            since: 0,
+            total: 1000,
+            fade_in: 0,
+            fade_out: 0,
+            tension_in: 0.0,
+            tension_out: 0.0,
+            gain: 1.0,
+            declick: 0,
+            gate: None,
+            shuffle: None,
+            tape: Some((0, 200, 1.0, 1.0)),
+        };
+        assert_eq!(shape.source_age(0), 0);
+        assert_eq!(shape.source_age(1000), 900);
+        assert_eq!(shape.source_age(999), 900);
+    }
+
+    #[test]
+    fn tape_stop_curve_changes_progression() {
+        let curve_one = ClipShape {
+            since: 0,
+            total: 1000,
+            fade_in: 0,
+            fade_out: 0,
+            tension_in: 0.0,
+            tension_out: 0.0,
+            gain: 1.0,
+            declick: 0,
+            gate: None,
+            shuffle: None,
+            tape: Some((0, 200, 1.0, 1.0)),
+        };
+        let curve_two = ClipShape { tape: Some((0, 200, 1.0, 2.0)), ..curve_one };
+        assert_ne!(curve_one.source_age(950), curve_two.source_age(950));
+    }
+
+    #[test]
+    fn tape_stop_shape_mutes_after_ramp() {
+        let shape = ClipShape {
+            since: 0,
+            total: 1000,
+            fade_in: 0,
+            fade_out: 0,
+            tension_in: 0.0,
+            tension_out: 0.0,
+            gain: 1.0,
+            declick: 0,
+            gate: None,
+            shuffle: None,
+            tape: Some((0, 200, 1.0, 1.0)),
+        };
+        assert_eq!(shape.at(999), 1.0);
+        assert_eq!(shape.at(1000), 0.0);
     }
 
     #[test]

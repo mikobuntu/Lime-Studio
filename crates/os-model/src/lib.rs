@@ -69,6 +69,12 @@ pub struct Project {
     pub patterns: Vec<Pattern>,
     pub mixer: Vec<MixerTrack>,
     pub arrangements: Vec<Arrangement>,
+    /// Session-only gated-volume POC data; not written to project files.
+    pub gated_volume: Vec<ClipGate>,
+    /// Session-only clip shuffler permutations; not written to project files.
+    pub shuffler: Vec<ClipShuffle>,
+    /// Session-only tape start/stop settings; not written to project files.
+    pub tape: Vec<ClipTape>,
     /// Number (event 99 value) of the arrangement the playlist shows (spec: flp/events/playlist.md, event 100).
     pub current_arrangement: Option<u16>,
     /// Automation clip data, one per automation channel (spec: flp/events/automation.md).
@@ -127,6 +133,29 @@ pub struct Project {
     /// the tracks' latency settings are (spec: audio/delay-compensation.md "Automatic"). Not in the FLP (where the
     /// original keeps it was not found): a `.lemon` file keeps it in its own events (os-app `lemon_state`).
     pub pdc_off: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipGate {
+    pub clip: usize,
+    pub divisor: u8,
+    pub mask: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipShuffle {
+    pub clip: usize,
+    pub divisor: u8,
+    pub order: [u8; 128],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipTape {
+    pub clip: usize,
+    pub start_ms: f32,
+    pub stop_ms: f32,
+    pub start_curve: f32,
+    pub stop_curve: f32,
 }
 
 /// One internal controller link (spec: flp/events/automation.md "Controller links"): output `output` of the controller

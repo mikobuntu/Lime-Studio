@@ -4887,8 +4887,7 @@ impl App {
         }
         // The initial values first (spec: ui/settings-choices.md "Advanced: Initialize controls automatically").
         crate::init::apply(&mut self.state);
-        let mut p = self.state.project.clone();
-        p.tempo = Some(self.state.tempo);
+        let p = crate::rack::play_project(&self.state);
         self.transport.stop();
         self.transport.set_loop(self.state.playlist.range);
         self.transport.play(&p, PlayMode::Song, f64::from(tick));

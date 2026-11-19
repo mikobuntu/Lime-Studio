@@ -1080,7 +1080,9 @@ fn clip_paint(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip) {
                 let col = if c.muted { content } else { dim(wave) };
                 // Colorful waveforms colour a clip that plays; a muted one keeps its grey.
                 let waves = (!c.muted).then(|| crate::waves::current(t));
-                waveform(ui, s, g, c, ch, body_at, col, waves.as_ref().map(|w| (w, &dim as &dyn Fn(Color) -> Color)));
+                waveform(ui, s, g, i, c, ch, body_at, col, waves.as_ref().map(|w| (w, &dim as &dyn Fn(Color) -> Color)));
+                gated_volume(ui, s, g, i, c, body_at.r);
+                shuffler(ui, s, i, body_at.r);
                 if !c.muted {
                     fades(ui, s, g, i, c, body_at, dim(wave));
                 }
@@ -1097,6 +1099,54 @@ fn clip_paint(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip) {
     }
     ui.c.pop_clip();
     flash(ui, s, g, c, r, if lemon { lk::r_btn(t).min(r.w / 2.0).min(r.h / 2.0) } else { 0.0 });
+}
+
+fn gated_volume(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip, body: Rect) {
+    let Some(gate) = s.playlist.gated_volume.get(&i).copied() else { return };
+    if body.w < 16.0 || body.h < 10.0 {
+        return;
+    }
+    ui.c.push_clip(body);
+    let unit = (g.ppq * 4 / u32::from(gate.divisor.max(1))).max(1);
+    let first = (c.position / unit) * unit;
+    let last = c.end().saturating_add(unit - 1);
+    for tick in (first..last).step_by(unit as usize) {
+        let x = g.x_of(tick as f32).max(body.x);
+        let x1 = g.x_of(tick.saturating_add(unit) as f32).min(body.right());
+        let segment = (tick / unit) as usize % usize::from(gate.divisor.max(1));
+        if !gate.is_on(segment) && x1 > x {
+            ui.c.fill_rect(Rect::new(x, body.y, x1 - x, body.h), ui.t.s(0x080b0e).with_alpha(175));
+        }
+        if tick > first && x >= body.x {
+            ui.c.line(x, body.y, x, body.bottom(), 1.0, ui.t.s(0xffffff).with_alpha(45));
+        }
+    }
+    ui.c.pop_clip();
+}
+
+fn shuffler(ui: &mut Ui, s: &State, i: usize, body: Rect) {
+    let Some(shuffle) = s.playlist.shuffler.get(&i) else { return };
+    let divisor = usize::from(shuffle.divisor.max(1));
+    if body.w < divisor as f32 * 3.0 || body.h < 10.0 || shuffle.order.len() != divisor {
+        return;
+    }
+    ui.c.push_clip(body);
+    let width = body.w / divisor as f32;
+    for destination in 0..divisor {
+        let x = body.x + destination as f32 * width;
+        let x1 = if destination + 1 == divisor { body.right() } else { body.x + (destination + 1) as f32 * width };
+        let source = usize::from(shuffle.order[destination]);
+        let tint = if source % 2 == 0 { 0xffffff } else { 0x8ca9c7 };
+        ui.c.fill_rect(Rect::new(x, body.y, x1 - x, body.h), ui.t.s(tint).with_alpha(22));
+        if destination > 0 {
+            ui.c.line(x, body.y, x, body.bottom(), 1.0, ui.t.s(0xffffff).with_alpha(110));
+        }
+        if x1 - x >= 14.0 {
+            let label = format!("{}", source + 1);
+            ui.c.text_clip(Font::new(10), x + 2.0, body.y + 2.0, x1 - x - 4.0, ui.t.s(0xffffff).with_alpha(190), &label);
+        }
+    }
+    ui.c.pop_clip();
 }
 
 /// An audio clip whose sample is still loading (spec: ui/project-loading.md): a soft highlight sweeps across its body
@@ -1182,12 +1232,46 @@ fn pattern_notes(ui: &mut Ui, s: &State, g: &PGeom, c: &Clip, n: u16, body: Body
 /// the clip's fades and gain, filled as one anti-aliased shape (§2, §9a). With `colours` (the colourful waveforms
 /// setting, and how the clip dims its colours) each column takes the colour of the frames behind it.
 #[allow(clippy::too_many_arguments)]
-fn waveform(ui: &mut Ui, s: &State, g: &PGeom, c: &Clip, ch: u16, body: Body, col: Color, colours: Option<(&Waves, &dyn Fn(Color) -> Color)>) {
+fn waveform(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip, ch: u16, body: Body, col: Color, colours: Option<(&Waves, &dyn Fn(Color) -> Color)>) {
     let Some(path) = s.project.channel(ch).and_then(|chan| chan.sample_path.clone()) else { return };
     let Some(w) = s.playlist.wave(&path) else { return };
     let Some(area) = ui.c.paint_bounds() else { return };
     let (w0, _) = pl::window(s, c);
     let ms_per_tick = pl::to_src(s, c.source, 1.0);
+    let shuffle = s.playlist.shuffler.get(&i);
+    let tape = s.playlist.tape.get(&i);
+    let taped_tick = |tick: f64| -> f64 {
+        let Some(tape) = tape else { return tick };
+        let start = f64::from(tape.start_ms) / pl::fade_ms_per_tick(s);
+        let stop = f64::from(tape.stop_ms) / pl::fade_ms_per_tick(s);
+        let start_p = f64::from(tape.start_curve).max(0.1);
+        let stop_p = f64::from(tape.stop_curve).max(0.1);
+        let start_d = start.min(f64::from(c.length));
+        let stop_d = stop.min(f64::from(c.length));
+        let after_start = if start_d == 0.0 || tick >= start_d {
+            tick - start_d + start_d / (start_p + 1.0)
+        } else {
+            start_d * (tick / start_d).powf(start_p + 1.0) / (start_p + 1.0)
+        };
+        let stop_at = f64::from(c.length).max(stop_d) - stop_d;
+        if stop_d > 0.0 && tick > stop_at {
+            let t = ((tick - stop_at) / stop_d).min(1.0);
+            let base = stop_at - start_d + start_d / (start_p + 1.0);
+            base + stop_d * (1.0 - (1.0 - t).powf(stop_p + 1.0)) / (stop_p + 1.0)
+        } else {
+            after_start
+        }
+    };
+    let shuffled_tick = |tick: f64| -> f64 {
+        let Some(shuffle) = shuffle else { return tick };
+        let divisor = f64::from(shuffle.divisor.max(1));
+        let total = f64::from(c.length.max(1));
+        let segment = (tick.max(0.0) * divisor / total).floor().min(divisor - 1.0);
+        let segment_start = segment * total / divisor;
+        let segment_end = (segment + 1.0) * total / divisor;
+        let source_start = f64::from(shuffle.order[segment as usize]) * total / divisor;
+        source_start + (tick - segment_start).max(0.0).min(segment_end - segment_start)
+    };
     let frames_per_ms = f64::from(w.rate) / 1000.0;
     let br = body.r;
     let mid = f64::from(br.y) + f64::from(br.h) / 2.0;
@@ -1224,8 +1308,9 @@ fn waveform(ui: &mut Ui, s: &State, g: &PGeom, c: &Clip, ch: u16, body: Body, co
     };
     // Peaks from `da` to `db` px into the body.
     let range = |da: f64, db: f64| -> Option<(f32, f32)> {
-        let ms_a = w0 + da / ppt * ms_per_tick;
-        let ms_b = w0 + db / ppt * ms_per_tick;
+         let ms_a = w0 + shuffled_tick(taped_tick(da / ppt)) * ms_per_tick;
+         let ms_b = w0 + shuffled_tick(taped_tick(db / ppt)) * ms_per_tick;
+        let (ms_a, ms_b) = (ms_a.min(ms_b), ms_a.max(ms_b));
         let fa = (ms_a * frames_per_ms).max(0.0) as usize / w.per;
         let fb = ((ms_b * frames_per_ms).max(0.0) as usize / w.per).max(fa + 1);
         if fa >= w.peaks.len() {
@@ -1273,7 +1358,7 @@ fn waveform(ui: &mut Ui, s: &State, g: &PGeom, c: &Clip, ch: u16, body: Body, co
     let tones = colours.filter(|(w, _)| w.on()).and_then(|_| s.playlist.tones(&path));
     match (colours, tones) {
         (Some((waves, dim)), Some(tones)) => {
-            let frames = |d: f64| (w0 + d / ppt * ms_per_tick) * frames_per_ms;
+            let frames = |d: f64| (w0 + shuffled_tick(taped_tick(d / ppt)) * ms_per_tick) * frames_per_ms;
             ui.c.fill_polygon_columns(&outline, &mut |x| {
                 let d = ((f64::from(x) - body.x) / px).floor() * px;
                 let t = tones.span(frames(d), frames(d + px));
@@ -1329,6 +1414,22 @@ fn fades(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip, edges: Body, wav
         curve(ui, edges.x, f64::from(xf.x1), xf.t_in, false);
         curve(ui, edges.x, f64::from(xf.x1), xf.t_out, true);
     }
+    if let Some(tape) = s.playlist.tape.get(&i) {
+        let start = body.x + pl::ms_px(s, g, tape.start_ms).min(body.w);
+        let stop = body.right() - pl::ms_px(s, g, tape.stop_ms).min(body.w);
+        let tape_col = ui.t.s(0xd6a85c).with_alpha(220);
+        let mut tape_curve = |xa: f32, xb: f32, curve: f32, start_ramp: bool| {
+            let n = ((xb - xa) / 2.0).ceil().max(2.0) as usize;
+            let points: Vec<(f32, f32)> = (0..=n).map(|k| {
+                let u = k as f64 / n as f64;
+                let value = if start_ramp { u.powf(f64::from(curve)) } else { (1.0 - u).powf(f64::from(curve)) } as f32;
+                (pl::snap(f64::from(xa) + f64::from(xb - xa) * u), pl::snap(f64::from(body.bottom()) - f64::from(value) * f64::from(body.h)))
+            }).collect();
+            ui.c.polyline(&points, 1.5, tape_col);
+        };
+        if start - body.x > 10.0 { tape_curve(body.x, start, tape.start_curve, true); }
+        if body.right() - stop > 10.0 { tape_curve(stop, body.right(), tape.stop_curve, false); }
+    }
     // Handles only while the mouse is over the clip (as FL): white, brighter on the one under the mouse. They fade in
     // and out (spec: ui/animations.md §4.6).
     let area = body.outset(8.0);
@@ -1338,7 +1439,7 @@ fn fades(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip, edges: Body, wav
         return;
     }
     let fading = (shown < 1.0).then(|| ui.c.begin_layer(area, false));
-    handles(ui, s, g, c, body, xf, &lit, white);
+    handles(ui, s, g, i, c, body, xf, &lit, white);
     if let Some(l) = fading {
         ui.c.end_layer(l, shown);
     }
@@ -1347,12 +1448,33 @@ fn fades(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip, edges: Body, wav
 
 /// An audio clip's handles (`fades`): `lit` says which is under the mouse.
 #[allow(clippy::too_many_arguments)]
-fn handles(ui: &mut Ui, s: &State, g: &PGeom, c: &Clip, body: Rect, xf: Option<pl::Xfade>, lit: &dyn Fn(pl::Handle) -> bool, white: Color) {
+fn handles(ui: &mut Ui, s: &State, g: &PGeom, i: usize, c: &Clip, body: Rect, xf: Option<pl::Xfade>, lit: &dyn Fn(pl::Handle) -> bool, white: Color) {
     let (fx_in, fx_out) = pl::fade_xs(s, g, c);
     let col = |h: pl::Handle| if lit(h) { white } else { white.with_alpha(215) };
+    let tape_col = ui.t.s(0xd6a85c).with_alpha(220);
     let k = 6.0;
     ui.c.fill_polygon(&[(fx_in, body.y), (fx_in + k, body.y), (fx_in, body.y + k)], col(pl::Handle::FadeIn));
     ui.c.fill_polygon(&[(fx_out, body.y), (fx_out - k, body.y), (fx_out, body.y + k)], col(pl::Handle::FadeOut));
+    if let Some(tape) = s.playlist.tape.get(&i) {
+        let start = body.x + pl::ms_px(s, g, tape.start_ms).min(body.w);
+        let stop = body.right() - pl::ms_px(s, g, tape.stop_ms).min(body.w);
+        ui.c.fill_polygon(&[(start, body.y), (start + k, body.y), (start, body.y + k)], tape_col);
+        ui.c.fill_polygon(&[(stop, body.y), (stop - k, body.y), (stop, body.y + k)], tape_col);
+        if start - body.x > 10.0 {
+            let mx = (body.x + start) / 2.0;
+            let my = body.bottom() - 0.5f32.powf(tape.start_curve) * body.h;
+            let h = pl::Handle::TapeTensionStart;
+            if lit(h) { ui.c.fill_circle(mx, my, 5.5, tape_col); }
+            else { ui.c.fill_circle(mx, my, 4.0, ui.t.s(0x1c2328).with_alpha(200)); ui.c.stroke_circle(mx, my, 4.0, 1.3, tape_col); }
+        }
+        if body.right() - stop > 10.0 {
+            let mx = (stop + body.right()) / 2.0;
+            let my = body.bottom() - 0.5f32.powf(tape.stop_curve) * body.h;
+            let h = pl::Handle::TapeTensionStop;
+            if lit(h) { ui.c.fill_circle(mx, my, 5.5, tape_col); }
+            else { ui.c.fill_circle(mx, my, 4.0, ui.t.s(0x1c2328).with_alpha(200)); ui.c.stroke_circle(mx, my, 4.0, 1.3, tape_col); }
+        }
+    }
     // The gain handle: a half disc on the body's bottom edge (a shape, not a clipped circle: clips are costly).
     let (gx, gy) = (body.cx(), body.bottom());
     let r = if lit(pl::Handle::Gain) { 5.0 } else { 4.0 };

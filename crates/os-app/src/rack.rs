@@ -2668,7 +2668,37 @@ pub fn play_project(s: &State) -> Project {
         expand_loops(&mut p, s, &rows);
     }
     crate::perform::apply(s, &mut p);
+    apply_clip_effects(s, &mut p);
     p
+}
+
+/// Add session-only clip effects to a project before playback or offline rendering.
+pub fn apply_clip_effects(s: &State, p: &mut Project) {
+    p.gated_volume = s
+        .playlist
+        .gated_volume
+        .iter()
+        .map(|(&clip, gate)| os_model::ClipGate { clip, divisor: gate.divisor, mask: gate.mask })
+        .collect();
+    p.shuffler = s
+        .playlist
+        .shuffler
+        .iter()
+        .filter_map(|(&clip, shuffle)| {
+            let mut order = [0u8; 128];
+            if shuffle.order.len() != usize::from(shuffle.divisor) {
+                return None;
+            }
+            order[..shuffle.order.len()].copy_from_slice(&shuffle.order);
+            Some(os_model::ClipShuffle { clip, divisor: shuffle.divisor, order })
+        })
+        .collect();
+    p.tape = s
+        .playlist
+        .tape
+        .iter()
+        .map(|(&clip, tape)| os_model::ClipTape { clip, start_ms: tape.start_ms, stop_ms: tape.stop_ms, start_curve: tape.start_curve, stop_curve: tape.stop_curve })
+        .collect();
 }
 
 /// Repeat each row's first `loop_len` steps up to the end of every pattern (its length as played, §23); notes past
