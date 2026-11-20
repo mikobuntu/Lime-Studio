@@ -52,6 +52,8 @@ lemon-formula-controller = { path = "../../plugins/lemon-formula-controller", fe
 lemon-slicer = { path = "../../plugins/lemon-slicer", features = ["linked"] }
 lemon-vocoder = { path = "../../plugins/lemon-vocoder", features = ["linked"] }
 lemon-drop = { path = "../../plugins/lemon-drop", features = ["linked"] }
+lime-glitch-sequencer = { path = "../../plugins/lime-glitch-sequencer", features = ["linked"] }
+lemon-glitch = { path = "../../plugins/lemon-glitch", features = ["linked"] }
 winit = "0.30"
 softbuffer = "0.4"
 cpal = "0.18"

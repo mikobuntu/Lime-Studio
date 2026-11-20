@@ -50,6 +50,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Stereo Enhancer",
     word: "STEREO ENHANCER",
     about: "Lemon Studio's stereo enhancer",
+    manual: &[],
     settings: &SETTINGS,
     version: None,
     any_version: false,
@@ -66,6 +67,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: true,
 };

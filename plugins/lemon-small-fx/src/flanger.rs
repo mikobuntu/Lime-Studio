@@ -73,6 +73,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Flanger",
     word: "FLANGER",
     about: "Lemon Studio's flanger",
+    manual: &[],
     settings: &SETTINGS,
     version: Some(dsp::VERSION),
     any_version: false,
@@ -91,6 +92,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: true,
 };

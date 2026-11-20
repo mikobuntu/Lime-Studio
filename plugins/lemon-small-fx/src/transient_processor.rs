@@ -70,6 +70,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Transient Processor",
     word: "TRANSIENT PROCESSOR",
     about: "Lemon Studio's transient processor",
+    manual: &[],
     settings: &SETTINGS,
     version: Some(dsp::VERSION),
     any_version: false,
@@ -86,6 +87,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: false,
 };

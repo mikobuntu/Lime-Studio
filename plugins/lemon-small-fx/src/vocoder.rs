@@ -166,6 +166,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Vocoder",
     word: "VOCODER",
     about: "Lemon Studio's vocoder",
+    manual: &[],
     settings: &SETTINGS,
     version: None,
     any_version: false,
@@ -182,6 +183,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: true,
 };
