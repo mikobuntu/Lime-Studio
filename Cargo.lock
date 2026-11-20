@@ -2285,19 +2285,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lime-glitch-sequencer"
-version = "0.0.1"
-dependencies = [
- "nih_plug",
- "os-hostlink",
- "os-plugkit",
- "os-theme",
- "os-ui",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3088,7 +3075,6 @@ dependencies = [
  "lemon-transient-processor",
  "lemon-vocoder",
  "libc",
- "lime-glitch-sequencer",
  "midir",
  "mp3lame-encoder",
  "objc2 0.6.5",
