@@ -101,6 +101,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Peak Controller",
     word: "PEAK CONTROLLER",
     about: "Lemon Studio's peak controller",
+    manual: &[],
     settings: &SETTINGS,
     version: None,
     any_version: false,
@@ -117,6 +118,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: false,
 };

@@ -37,6 +37,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Soft Clipper",
     word: "SOFT CLIPPER",
     about: "Lemon Studio's soft clipper",
+    manual: &[],
     settings: &SETTINGS,
     version: None,
     any_version: false,
@@ -53,6 +54,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: false,
 };

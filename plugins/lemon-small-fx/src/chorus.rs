@@ -65,6 +65,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Chorus",
     word: "CHORUS",
     about: "Lemon Studio's chorus",
+    manual: &[],
     settings: &SETTINGS,
     version: Some(dsp::VERSION),
     any_version: false,
@@ -81,6 +82,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: true,
 };

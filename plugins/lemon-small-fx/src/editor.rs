@@ -12,12 +12,12 @@
 // lemon-transient-processor.md; each §2 controls, §4 magnets), plugins/host-link.md
 
 use std::any::Any;
-use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 
 use nih_plug::prelude::*;
-use os_plugkit::vals::Vals;
 use os_plugkit::MenuDef;
+use os_plugkit::vals::Vals;
 use os_ui::kit::menu::{MenuItem, MenuStyle};
 
 use crate::params::{self, FxParams};
@@ -60,22 +60,46 @@ impl FxEditor {
 }
 
 impl Editor for FxEditor {
-    fn spawn(&self, parent: ParentWindowHandle, context: Arc<dyn GuiContext>) -> Box<dyn Any + Send> {
+    fn spawn(
+        &self,
+        parent: ParentWindowHandle,
+        context: Arc<dyn GuiContext>,
+    ) -> Box<dyn Any + Send> {
         let scale = f32::from_bits(self.scale.load(Ordering::Relaxed));
         match parent {
             #[cfg(windows)]
-            ParentWindowHandle::Win32Hwnd(hwnd) => {
-                Box::new(win32::open(hwnd, scale, self.spec, self.params.clone(), self.shared.clone(), context, self.hwnd.clone()))
-            }
+            ParentWindowHandle::Win32Hwnd(hwnd) => Box::new(win32::open(
+                hwnd,
+                scale,
+                self.spec,
+                self.params.clone(),
+                self.shared.clone(),
+                context,
+                self.hwnd.clone(),
+            )),
             #[cfg(target_os = "linux")]
-            ParentWindowHandle::X11Window(window) => {
-                Box::new(gui::open(window, scale, self.spec, self.params.clone(), self.shared.clone(), context, &self.slot))
-            }
+            ParentWindowHandle::X11Window(window) => Box::new(gui::open(
+                window,
+                scale,
+                self.spec,
+                self.params.clone(),
+                self.shared.clone(),
+                context,
+                &self.slot,
+            )),
             // macOS hosts set no scale (sizes are points): the editor paints at its window's backing scale.
             #[cfg(target_os = "macos")]
             ParentWindowHandle::AppKitNsView(view) => {
                 let scale = os_plugkit::gui::backing_scale(view as usize);
-                Box::new(gui::open(view as usize, scale, self.spec, self.params.clone(), self.shared.clone(), context, &self.slot))
+                Box::new(gui::open(
+                    view as usize,
+                    scale,
+                    self.spec,
+                    self.params.clone(),
+                    self.shared.clone(),
+                    context,
+                    &self.slot,
+                ))
             }
             // Elsewhere no editor opens yet.
             _ => {
@@ -177,6 +201,29 @@ struct Drag {
     px: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum StepEdge {
+    Start,
+    End,
+}
+
+#[derive(Clone, Debug)]
+enum StepGesture {
+    Paint {
+        on: bool,
+        lane: &'static [&'static str],
+        last_id: String,
+    },
+    Resize {
+        lane: Vec<String>,
+        baseline: Vec<bool>,
+        start: usize,
+        end: usize,
+        edge: StepEdge,
+        last: usize,
+    },
+}
+
 pub struct Logic {
     pub spec: &'static Spec,
     pub vals: Vals,
@@ -185,6 +232,7 @@ pub struct Logic {
     pub view: ViewState,
     pub hits: Vec<view::Hit>,
     drag: Option<Drag>,
+    step_gesture: Option<StepGesture>,
     /// Hint text.
     pub hint: String,
     copied: Option<f32>,
@@ -192,17 +240,38 @@ pub struct Logic {
 }
 
 impl Logic {
-    pub fn new(spec: &'static Spec, params: Arc<FxParams>, shared: Arc<Shared>, ctx: Option<Arc<dyn GuiContext>>) -> Self {
+    pub fn new(
+        spec: &'static Spec,
+        params: Arc<FxParams>,
+        shared: Arc<Shared>,
+        ctx: Option<Arc<dyn GuiContext>>,
+    ) -> Self {
         let vals = Vals::new(&*params, params.live.clone(), ctx);
-        Logic { spec, vals, params, shared, view: ViewState::default(), hits: Vec::new(), drag: None, hint: String::new(), copied: None, hosted: false }
+        Logic {
+            spec,
+            vals,
+            params,
+            shared,
+            view: ViewState::default(),
+            hits: Vec::new(),
+            drag: None,
+            step_gesture: None,
+            hint: String::new(),
+            copied: None,
+            hosted: false,
+        }
     }
 
     pub fn dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_some() || self.step_gesture.is_some()
     }
 
     fn hit(&self, x: f32, y: f32) -> Option<(Target, os_ui::Rect)> {
-        self.hits.iter().rev().find(|h| h.r.contains(x, y)).map(|h| (h.t.clone(), h.r))
+        self.hits
+            .iter()
+            .rev()
+            .find(|h| h.r.contains(x, y))
+            .map(|h| (h.t.clone(), h.r))
     }
 
     fn hint_for(&self, t: Option<&Target>) -> String {
@@ -215,7 +284,14 @@ impl Logic {
                 }
                 None => String::new(),
             },
-            Some(t) => view::hint(self.spec, t, &self.vals),
+            Some(t) => view::hint(
+                self.spec,
+                t,
+                &view::Shown {
+                    spec: self.spec,
+                    vals: &self.vals,
+                },
+            ),
             None => String::new(),
         }
     }
@@ -223,22 +299,103 @@ impl Logic {
     /// A text field's readers ([`crate::Control::Text`]).
     fn text_control(&self, id: &str) -> Option<(TextShow, TextEdit)> {
         self.spec.controls.iter().find_map(|c| match *c {
-            crate::Control::Text { id: i, show, edit, .. } if i == id => Some((show, edit)),
+            crate::Control::Text {
+                id: i, show, edit, ..
+            } if i == id => Some((show, edit)),
             _ => None,
         })
     }
 
     fn range(&self, id: &str) -> (i32, i32) {
-        self.spec.index(id).map_or((0, 1), |k| self.spec.settings[k].range)
+        self.spec
+            .index(id)
+            .map_or((0, 1), |k| self.spec.settings[k].range)
+    }
+
+    fn step_cell(&self, id: &str) -> Option<(&'static [&'static str], usize)> {
+        self.spec.controls.iter().find_map(|control| match control {
+            crate::Control::StepGrid { ids, .. } => ids.iter().find_map(|lane| {
+                lane.iter()
+                    .position(|candidate| *candidate == id)
+                    .map(|column| (*lane, column))
+            }),
+            _ => None,
+        })
+    }
+
+    fn step_active(&self, id: &str) -> bool {
+        self.vals.plain(id) > self.range(id).0 as f32
+    }
+
+    fn step_segment(&self, lane: &[&str], column: usize) -> Option<(usize, usize)> {
+        if !self.step_active(lane[column]) {
+            return None;
+        }
+        let start = (0..column)
+            .rev()
+            .find(|&index| !self.step_active(lane[index]))
+            .map_or(0, |index| index + 1);
+        let end = (column + 1..lane.len())
+            .find(|&index| !self.step_active(lane[index]))
+            .map_or(lane.len() - 1, |index| index - 1);
+        Some((start, end))
+    }
+
+    fn begin_step_resize(&mut self, lane: &[&str], start: usize, end: usize, edge: StepEdge) {
+        let lane = lane.iter().map(|id| (*id).to_string()).collect::<Vec<_>>();
+        let mut baseline = lane
+            .iter()
+            .map(|id| self.step_active(id))
+            .collect::<Vec<_>>();
+        baseline[start..=end].fill(false);
+        let last = match edge {
+            StepEdge::Start => start,
+            StepEdge::End => end,
+        };
+        self.step_gesture = Some(StepGesture::Resize {
+            lane,
+            baseline,
+            start,
+            end,
+            edge,
+            last,
+        });
     }
 
     fn edit(&mut self, id: &str, norm: f32) {
         self.vals.edit(id, norm);
     }
 
+    /// Sets a setting to a normalized value in its shown space, inside a gesture: the stored value written is the
+    /// shown one plus the spec's offset, in its range (the out knob drags the effective gain while linked).
+    fn set_shown(&mut self, id: &str, norm: f32) {
+        match self
+            .spec
+            .index(id)
+            .and_then(|k| view::offset(self.spec, &self.vals, k))
+        {
+            None => self.vals.set(id, norm),
+            Some(off) => {
+                let (lo, hi) = self.range(id);
+                let shown = lo as f32 + norm.clamp(0.0, 1.0) * (hi - lo) as f32;
+                let stored = (shown + off as f32).clamp(lo as f32, hi as f32);
+                self.vals.set(id, self.vals.plain_to_norm(id, stored));
+            }
+        }
+    }
+
+    /// One complete edit in a setting's shown space (a paste, a reset): the knob lands where it is put.
+    fn edit_shown(&mut self, id: &str, norm: f32) {
+        self.vals.begin(id);
+        self.set_shown(id, norm);
+        self.vals.end(id);
+    }
+
     /// A drag position `v` (normalised) moved onto its magnet, if it has one (spec §4).
     fn snapped(&self, id: &str, v: f32) -> f32 {
-        let Some(k) = self.spec.index(id) else { return v };
+        let Some(k) = self.spec.index(id) else {
+            return v;
+        };
         let (lo, hi) = self.range(id);
         let plain = lo as f32 + v * (hi - lo) as f32;
         match params::snap(self.spec, k, plain) {
@@ -249,32 +406,107 @@ impl Logic {
 
     fn reset(&mut self, id: &str) {
         let d = self.vals.default_norm(id);
-        self.edit(id, d);
+        self.edit_shown(id, d);
     }
 
     fn begin_drag(&mut self, id: &str, px: f32, t: Target) -> Vec<Act> {
         self.vals.begin(id);
-        self.drag = Some(Drag { id: id.into(), v: self.vals.norm(id), px });
+        self.drag = Some(Drag {
+            id: id.into(),
+            v: view::shown_norm(self.spec, &self.vals, id),
+            px,
+        });
         self.view.pressed = Some(t);
         vec![Act::Repaint, Act::Lock]
     }
 
     pub fn down(&mut self, x: f32, y: f32, btn: Btn, m: Mods, _dbl: bool) -> Vec<Act> {
         self.view.mouse = Some((x, y));
-        let Some((t, _)) = self.hit(x, y) else { return vec![] };
+        let Some((t, hit_rect)) = self.hit(x, y) else {
+            return vec![];
+        };
         let id = t.id().to_string();
         let mut acts = vec![Act::Repaint];
         match (&t, btn) {
             (Target::Logo, Btn::Left | Btn::Right) => acts.push(Act::Menu(MenuReq::About, x, y)),
             (Target::Logo, _) => {}
+            (Target::Lane(lane), Btn::Left) => self.view.selected = *lane,
+            (Target::Lane(_), _) => {}
             // A text field types its text in (it has no value to reset or automate).
             (Target::Text(_), Btn::Left | Btn::Right) => acts.push(Act::TypeIn(id, x, y)),
             (Target::Text(_), _) => {}
+            (Target::Choice(_, _), Btn::Right)
+                if self
+                    .spec
+                    .controls
+                    .iter()
+                    .any(|control| control.is_step_cell(&id)) =>
+            {
+                if let Some((lane, column)) = self.step_cell(&id) {
+                    if let Some((start, end)) = self.step_segment(lane, column) {
+                        let (lo, _) = self.range(&id);
+                        for step in &lane[start..=end] {
+                            self.vals.edit_plain(step, lo as f32);
+                        }
+                    }
+                }
+                self.view.pressed = Some(t.clone());
+            }
             (_, Btn::Left) if m.alt => self.reset(&id),
             (_, Btn::Middle) => self.reset(&id),
             (_, Btn::Right) => acts.push(Act::Menu(MenuReq::Param(id), x, y)),
             (Target::Knob(_), Btn::Left) => acts = self.begin_drag(&id, KNOB_PX, t.clone()),
             (Target::Fader(_, px), Btn::Left) => acts = self.begin_drag(&id, *px, t.clone()),
+            (Target::Choice(_, v), Btn::Left)
+                if self
+                    .spec
+                    .controls
+                    .iter()
+                    .any(|control| control.is_step_cell(&id)) =>
+            {
+                let on = self.step_active(&id);
+                let erase = m.ctrl;
+                let resize_edge =
+                    self.step_cell(&id)
+                        .filter(|_| !erase)
+                        .and_then(|(lane, column)| {
+                            let (start, end) = self.step_segment(lane, column)?;
+                            let grip = (hit_rect.w * 0.3).max(8.0);
+                            let left_grip = column == start && x - hit_rect.x <= grip;
+                            let right_grip =
+                                column == end && hit_rect.right() - x <= grip;
+                            match (left_grip, right_grip) {
+                                (true, true) => Some((
+                                    lane,
+                                    start,
+                                    end,
+                                    if x - hit_rect.x < hit_rect.w / 2.0 {
+                                        StepEdge::Start
+                                    } else {
+                                        StepEdge::End
+                                    },
+                                )),
+                                (true, false) => Some((lane, start, end, StepEdge::Start)),
+                                (false, true) => Some((lane, start, end, StepEdge::End)),
+                                (false, false) => None,
+                            }
+                        });
+                if let Some((lane, start, end, edge)) = resize_edge {
+                    self.begin_step_resize(lane, start, end, edge);
+                    self.view.pressed = Some(t.clone());
+                } else {
+                    // Ctrl always clears, whatever the first cell held.
+                    let value = if erase { self.range(&id).0 } else { *v };
+                    let lane = self.step_cell(&id).map_or(&[][..], |(lane, _)| lane);
+                    self.vals.edit_plain(&id, value as f32);
+                    self.step_gesture = Some(StepGesture::Paint {
+                        on: !erase && !on,
+                        lane,
+                        last_id: id.clone(),
+                    });
+                    self.view.pressed = Some(t.clone());
+                }
+            }
             (Target::Choice(_, v), Btn::Left) => {
                 let n = self.vals.plain_to_norm(&id, *v as f32);
                 self.edit(&id, n);
@@ -286,12 +518,14 @@ impl Logic {
 
     /// Mouse movement during a locked drag (logical px since the last event).
     pub fn delta(&mut self, _dx: f32, dy: f32, m: Mods) -> Vec<Act> {
-        let Some(Drag { id, v, px }) = self.drag.clone() else { return vec![] };
+        let Some(Drag { id, v, px }) = self.drag.clone() else {
+            return vec![];
+        };
         let f = if m.ctrl { FINE } else { 1.0 };
         let v = (v - dy * f / px).clamp(0.0, 1.0);
         // The drag keeps its own position; the setting lands on a magnet (Shift drags freely).
         let shown = if m.shift { v } else { self.snapped(&id, v) };
-        self.vals.set(&id, shown);
+        self.set_shown(&id, shown);
         self.drag = Some(Drag { id, v, px });
         let t = self.view.pressed.clone();
         self.hint = self.hint_for(t.as_ref());
@@ -299,7 +533,13 @@ impl Logic {
     }
 
     pub fn up(&mut self, _btn: Btn) -> Vec<Act> {
-        let Some(d) = self.drag.take() else { return vec![] };
+        if self.step_gesture.take().is_some() {
+            self.view.pressed = None;
+            return vec![Act::Repaint];
+        }
+        let Some(d) = self.drag.take() else {
+            return vec![];
+        };
         self.vals.end(&d.id);
         self.view.pressed = None;
         vec![Act::Repaint]
@@ -307,6 +547,72 @@ impl Logic {
 
     pub fn moved(&mut self, x: f32, y: f32, _m: Mods) -> Vec<Act> {
         self.view.mouse = Some((x, y));
+        match self.step_gesture.clone() {
+            Some(StepGesture::Paint { on, lane, last_id }) => {
+                if let Some((Target::Choice(id, _), _)) = self.hit(x, y) {
+                    if id != last_id
+                        && self.step_cell(&id).is_some_and(|(candidate_lane, _)| candidate_lane == lane)
+                    {
+                        let (lo, hi) = self.range(&id);
+                        let value = if on { hi } else { lo };
+                        self.vals.edit_plain(&id, value as f32);
+                        self.step_gesture = Some(StepGesture::Paint {
+                            on,
+                            lane,
+                            last_id: id.clone(),
+                        });
+                        self.view.pressed = Some(Target::Choice(id, value));
+                    }
+                }
+                return vec![Act::Repaint];
+            }
+            Some(StepGesture::Resize {
+                lane,
+                baseline,
+                start,
+                end,
+                edge,
+                last,
+            }) => {
+                if let Some((Target::Choice(id, _), _)) = self.hit(x, y) {
+                    if let Some(column) = lane.iter().position(|step| step == &id) {
+                        let boundary = match edge {
+                            StepEdge::Start => column.min(end),
+                            StepEdge::End => column.max(start),
+                        };
+                        if boundary != last {
+                            let (new_start, new_end) = match edge {
+                                StepEdge::Start => (boundary, end),
+                                StepEdge::End => (start, boundary),
+                            };
+                            for (index, step) in lane.iter().enumerate() {
+                                let active =
+                                    baseline[index] || (new_start..=new_end).contains(&index);
+                                if self.step_active(step) != active {
+                                    let (lo, hi) = self.range(step);
+                                    self.vals
+                                        .edit_plain(step, if active { hi } else { lo } as f32);
+                                }
+                            }
+                            let cell_on = self.step_active(&lane[column]);
+                            self.step_gesture = Some(StepGesture::Resize {
+                                lane,
+                                baseline,
+                                start,
+                                end,
+                                edge,
+                                last: boundary,
+                            });
+                            let (lo, hi) = self.range(&id);
+                            self.view.pressed =
+                                Some(Target::Choice(id, if cell_on { lo } else { hi }));
+                        }
+                    }
+                }
+                return vec![Act::Repaint];
+            }
+            None => {}
+        }
         if self.drag.is_none() {
             let t = self.hit(x, y).map(|h| h.0);
             self.hint = self.hint_for(t.as_ref());
@@ -322,17 +628,28 @@ impl Logic {
 
     /// Wheel: one step per notch (1/128 of the range for the settings with many steps).
     pub fn wheel(&mut self, x: f32, y: f32, notches: f32, m: Mods) -> Vec<Act> {
-        let Some((t, _)) = self.hit(x, y).filter(|(t, _)| !matches!(t, Target::Logo | Target::Text(_))) else { return vec![] };
+        let Some((t, _)) = self
+            .hit(x, y)
+            .filter(|(t, _)| !matches!(t, Target::Logo | Target::Lane(_) | Target::Text(_)))
+        else {
+            return vec![];
+        };
         let id = t.id().to_string();
         let (lo, hi) = self.range(&id);
         let steps = (hi - lo) as f32;
-        let step = if steps > WHEEL_STEPS { (steps / WHEEL_STEPS).round() } else { 1.0 };
-        let cur = self.vals.plain(&id);
+        let step = if steps > WHEEL_STEPS {
+            (steps / WHEEL_STEPS).round()
+        } else {
+            1.0
+        };
+        let cur = view::shown_plain(self.spec, &self.vals, &id);
         let mut plain = (cur + notches.signum() * step).clamp(lo as f32, hi as f32);
         if let (Some(k), false) = (self.spec.index(&id), m.shift) {
-            plain = params::snap_step(self.spec, k, cur.round() as i32, plain.round() as i32) as f32;
+            plain =
+                params::snap_step(self.spec, k, cur.round() as i32, plain.round() as i32) as f32;
         }
-        self.vals.edit_plain(&id, plain);
+        self.vals
+            .edit_plain(&id, view::stored_plain(self.spec, &self.vals, &id, plain));
         self.hint = self.hint_for(Some(&t));
         vec![Act::Repaint]
     }
@@ -345,20 +662,36 @@ impl Logic {
                 m.add(MenuItem::item("Reset"), Cmd::Reset(id.clone()));
                 m.sep(Cmd::None);
                 m.add(MenuItem::item("Copy value"), Cmd::CopyValue(id.clone()));
-                m.add(MenuItem::item("Paste value").enabled(self.copied.is_some()), Cmd::PasteValue(id.clone()));
-                m.add(MenuItem::item("Enter value..."), Cmd::TypeIn(id.clone()));
+                m.add(
+                    MenuItem::item("Paste value").enabled(self.copied.is_some()),
+                    Cmd::PasteValue(id.clone()),
+                );
+                m.add(MenuItem::item("Type in value..."), Cmd::TypeIn(id.clone()));
                 // Automation belongs to the host: offered when Lemon Studio hosts the editor (host link).
                 m.sep(Cmd::None);
-                m.add(MenuItem::item("Create automation clip").enabled(self.hosted), Cmd::Automate(id.clone()));
+                m.add(
+                    MenuItem::item("Create automation clip").enabled(self.hosted),
+                    Cmd::Automate(id.clone()),
+                );
                 m.sep(Cmd::None);
-                m.add(MenuItem::item(&format!("About {}...", self.spec.name)), Cmd::About);
+                m.add(
+                    MenuItem::item(&format!("About {}...", self.spec.name)),
+                    Cmd::About,
+                );
                 m
             }
             MenuReq::About => {
                 let mut m = MenuDef::new(MenuStyle::Context);
                 m.head(self.spec.name, Cmd::None);
-                m.add(MenuItem::item(&format!("Version {}", env!("CARGO_PKG_VERSION"))).enabled(false), Cmd::None);
+                m.add(
+                    MenuItem::item(&format!("Version {}", env!("CARGO_PKG_VERSION")))
+                        .enabled(false),
+                    Cmd::None,
+                );
                 m.add(MenuItem::item(self.spec.about).enabled(false), Cmd::None);
+                for line in self.spec.manual {
+                    m.add(MenuItem::item(line).enabled(false), Cmd::None);
+                }
                 m
             }
         }
@@ -368,37 +701,36 @@ impl Logic {
         match cmd {
             Cmd::None => {}
             Cmd::Reset(id) => self.reset(&id),
-            Cmd::CopyValue(id) => self.copied = Some(self.vals.norm(&id)),
+            Cmd::CopyValue(id) => self.copied = Some(view::shown_norm(self.spec, &self.vals, &id)),
             Cmd::PasteValue(id) => {
                 if let Some(v) = self.copied {
-                    self.edit(&id, v);
+                    self.edit_shown(&id, v);
                 }
             }
             Cmd::TypeIn(id) => return vec![Act::TypeIn(id, x, y)],
-            Cmd::Automate(id) => return self.spec.index(&id).map(Act::Automate).into_iter().collect(),
+            Cmd::Automate(id) => {
+                return self
+                    .spec
+                    .index(&id)
+                    .map(Act::Automate)
+                    .into_iter()
+                    .collect();
+            }
             Cmd::About => return vec![Act::Menu(MenuReq::About, x, y)],
         }
         vec![Act::Repaint]
     }
 
-    /// The value text a type-in box starts with.
+    /// The value text a type-in box starts with (the shown value, what the knob reads).
     pub fn value_text(&self, id: &str) -> String {
         match self.text_control(id) {
             Some((show, _)) => show(&self.params.raw_copy()).0,
-            None => self.vals.text(id),
+            None => view::shown_text(self.spec, &self.vals, id),
         }
     }
 
-    /// The type-in box that opened on `start` closed with Enter on `text`: an unchanged box changes nothing (re-reading
-    /// a text several values show could pick another of them).
-    pub fn entered(&mut self, id: &str, start: &str, text: &str) {
-        if text != start {
-            self.typed(id, text);
-        }
-    }
-
-    /// Applies a typed value (a text field's text goes into the saved state). Where several values show the text of
-    /// the one picked, the current value stays if it is one of them, else the default if it is.
+    /// Applies a typed value: a text field's text goes into the saved state; else the typed value is what the knob shows
+    /// (the stored one gains the spec's offset).
     pub fn typed(&mut self, id: &str, text: &str) {
         if let Some((_, edit)) = self.text_control(id) {
             let raw = edit(&self.params.raw_copy(), text);
@@ -408,27 +740,39 @@ impl Logic {
             return;
         }
         let Some(k) = self.spec.index(id) else { return };
-        let Some(picked) = (self.spec.parse)(k, text) else { return };
-        let shown = (self.spec.text)(k, picked);
-        let cur = self.vals.plain(id).round() as i32;
-        let v = [cur, self.spec.settings[k].start].into_iter().find(|&v| (self.spec.text)(k, v) == shown).unwrap_or(picked);
-        if v != cur {
-            self.vals.edit_plain(id, v as f32);
-        }
+        let Some(v) = (self.spec.parse)(k, text) else {
+            return;
+        };
+        let (lo, hi) = self.range(id);
+        let plain = match view::offset(self.spec, &self.vals, k) {
+            Some(off) => (v + off).clamp(lo, hi),
+            None => v.clamp(lo, hi),
+        };
+        self.vals.edit_plain(id, plain as f32);
     }
 
     /// Paints the editor; `hint` is drawn when the host does not show it.
     pub fn paint(&mut self, c: &mut os_ui::Canvas, palette: &os_theme::Palette) {
-        let hint = if self.hosted { String::new() } else { self.hint.clone() };
-        if self.spec.controls.iter().any(|c| matches!(c, crate::Control::Text { .. })) {
+        let hint = if self.hosted {
+            String::new()
+        } else {
+            self.hint.clone()
+        };
+        let playhead = self.shared.playhead.load(Ordering::Acquire);
+        self.view.playhead = (playhead != u32::MAX).then_some(playhead as usize);
+        if self
+            .spec
+            .controls
+            .iter()
+            .any(|c| matches!(c, crate::Control::Text { .. }))
+        {
             self.view.raw = self.params.raw_copy();
         }
-        // The display pictures the settings as they play, stored values outside the ranges included (spec §2 Display).
-        if self.spec.display.is_some() {
-            let n = self.spec.settings.len();
-            self.view.settings = self.params.settings(&self.params.raw_copy())[..n].to_vec();
-        }
-        self.hits = view::paint(self.spec, c, palette, &self.vals, &self.view, &hint);
+        let shown = view::Shown {
+            spec: self.spec,
+            vals: &self.vals,
+        };
+        self.hits = view::paint(self.spec, c, palette, &shown, &self.view, &hint);
     }
 }
 
@@ -438,8 +782,8 @@ impl Logic {
 #[cfg(windows)]
 mod win32 {
     use std::ffi::c_void;
-    use std::sync::atomic::{AtomicIsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicIsize, Ordering};
 
     use nih_plug::prelude::GuiContext;
     use os_plugkit::win::{self as pw, CursorLock};
@@ -449,7 +793,9 @@ mod win32 {
     use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::WM_MOUSELEAVE;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     use super::{Act, Btn, Logic, Mods};
@@ -553,7 +899,11 @@ mod win32 {
 
     unsafe fn state(hwnd: HWND) -> Option<&'static mut Win> {
         let p = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Win;
-        if p.is_null() { None } else { Some(unsafe { &mut *p }) }
+        if p.is_null() {
+            None
+        } else {
+            Some(unsafe { &mut *p })
+        }
     }
 
     unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -574,7 +924,9 @@ mod win32 {
                 }
                 return DefWindowProcW(hwnd, msg, wp, lp);
             }
-            let Some(w) = state(hwnd) else { return DefWindowProcW(hwnd, msg, wp, lp) };
+            let Some(w) = state(hwnd) else {
+                return DefWindowProcW(hwnd, msg, wp, lp);
+            };
             if msg == os_hostlink::message() {
                 return w.host_link(wp, lp);
             }
@@ -588,7 +940,8 @@ mod win32 {
                     w.poll();
                     0
                 }
-                WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONDBLCLK | WM_MBUTTONDOWN => {
+                WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONDBLCLK
+                | WM_MBUTTONDOWN => {
                     SetFocus(hwnd);
                     let (x, y) = w.mouse(lp);
                     let btn = match msg {
@@ -605,13 +958,20 @@ mod win32 {
                 }
                 WM_MOUSEMOVE => {
                     if !w.tracking {
-                        let mut tme = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                        let mut tme = TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                            dwFlags: TME_LEAVE,
+                            hwndTrack: hwnd,
+                            dwHoverTime: 0,
+                        };
                         TrackMouseEvent(&mut tme);
                         w.tracking = true;
                     }
                     if let Some((dx, dy)) = w.lock.delta() {
                         if dx != 0 || dy != 0 {
-                            let acts = w.logic.delta(dx as f32 / w.scale, dy as f32 / w.scale, mods());
+                            let acts =
+                                w.logic
+                                    .delta(dx as f32 / w.scale, dy as f32 / w.scale, mods());
                             w.run(acts);
                         }
                         return 0;
@@ -650,7 +1010,10 @@ mod win32 {
                     let mut r: RECT = std::mem::zeroed();
                     GetWindowRect(hwnd, &mut r);
                     let (sx, sy) = pw::xy(lp);
-                    let (x, y) = ((sx - r.left) as f32 / w.scale, (sy - r.top) as f32 / w.scale);
+                    let (x, y) = (
+                        (sx - r.left) as f32 / w.scale,
+                        (sy - r.top) as f32 / w.scale,
+                    );
                     let notches = ((wp >> 16) & 0xffff) as u16 as i16 as f32 / 120.0;
                     let acts = w.logic.wheel(x, y, notches, mods());
                     w.run(acts);
@@ -701,7 +1064,9 @@ mod win32 {
                     Act::Menu(req, x, y) => {
                         let def = self.logic.menu(&req);
                         let (sx, sy) = self.screen(x, y);
-                        if let Some(cmd) = pw::popup(self.hwnd, sx, sy, &def, &self.palette, self.scale) {
+                        if let Some(cmd) =
+                            pw::popup(self.hwnd, sx, sy, &def, &self.palette, self.scale)
+                        {
                             let acts = self.logic.pick(&req, cmd, x, y);
                             self.run(acts);
                         }
@@ -711,12 +1076,16 @@ mod win32 {
                         let (sx, sy) = self.screen(x, y);
                         let cur = self.logic.value_text(&id);
                         if let Some(t) = pw::type_in(self.hwnd, sx, sy, &cur, self.scale) {
-                            self.logic.entered(&id, &cur, &t);
+                            self.logic.typed(&id, &t);
                         }
                         repaint = true;
                     }
                     Act::Automate(i) => {
-                        os_hostlink::to_host(self.hwnd as isize, os_hostlink::Cmd::Automate, i as isize);
+                        os_hostlink::to_host(
+                            self.hwnd as isize,
+                            os_hostlink::Cmd::Automate,
+                            i as isize,
+                        );
                     }
                 }
             }
@@ -728,7 +1097,9 @@ mod win32 {
         /// Answers the host (spec `plugins/host-link.md`): one page, the hint line. Unknown commands return 0.
         unsafe fn host_link(&mut self, wp: WPARAM, lp: LPARAM) -> LRESULT {
             use os_hostlink::{Cmd, PageIcon};
-            let Some(cmd) = Cmd::from_usize(wp) else { return 0 };
+            let Some(cmd) = Cmd::from_usize(wp) else {
+                return 0;
+            };
             match cmd {
                 Cmd::Hello => {
                     self.logic.hosted = true;
@@ -738,7 +1109,9 @@ mod win32 {
                 Cmd::PageCount => 1,
                 Cmd::PageIcon => PageIcon::Plugin as LRESULT,
                 Cmd::GetPage | Cmd::SetPage => 0,
-                Cmd::Metrics => os_hostlink::pack_size(self.logic.spec.size.0, self.logic.spec.size.1),
+                Cmd::Metrics => {
+                    os_hostlink::pack_size(self.logic.spec.size.0, self.logic.spec.size.1)
+                }
                 Cmd::Hint => {
                     if lp != 0 {
                         // SAFETY: the host passes a `HintBuf` of its own process (spec: host-link.md).
@@ -746,7 +1119,13 @@ mod win32 {
                     }
                     1
                 }
-                Cmd::Changed | Cmd::Note | Cmd::Automate | Cmd::Audio | Cmd::Resizable | Cmd::SetSize | Cmd::Notes => 0,
+                Cmd::Changed
+                | Cmd::Note
+                | Cmd::Automate
+                | Cmd::Audio
+                | Cmd::Resizable
+                | Cmd::SetSize
+                | Cmd::Notes => 0,
             }
         }
 
@@ -763,8 +1142,8 @@ mod win32 {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod gui {
-    use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     use nih_plug::prelude::GuiContext;
     use os_hostlink::{Cmd, PageIcon, Peer};
@@ -818,16 +1197,37 @@ mod gui {
         slot: &px::Slot,
     ) -> Handle {
         let scale = if scale > 0.0 { scale } else { 1.0 };
-        let size = ((spec.size.0 as f32 * scale).round() as u32, (spec.size.1 as f32 * scale).round() as u32);
+        let size = (
+            (spec.size.0 as f32 * scale).round() as u32,
+            (spec.size.1 as f32 * scale).round() as u32,
+        );
         let sh = shared.clone();
         // One page; joined, the editor keeps its size (it has no strip row of its own).
         let wake = slot.clone();
-        let link = Peer::register(parent as u64, vec![PageIcon::Plugin], spec.size, move || px::notify(&wake));
+        let link = Peer::register(
+            parent as u64,
+            vec![PageIcon::Plugin],
+            spec.size,
+            move || px::notify(&wake),
+        );
         let peer = link.clone();
         let thread = px::spawn(parent, size, slot, move |win| {
-            let Ok(canvas) = Canvas::new(size.0, size.1, scale) else { return };
+            let Ok(canvas) = Canvas::new(size.0, size.1, scale) else {
+                return;
+            };
             let logic = Logic::new(spec, params, shared, Some(ctx));
-            let ed = Ed { win, canvas, buf: Vec::new(), scale, size, logic, palette: os_plugkit::palette(), last_hint: String::new(), dirty: true, link: peer };
+            let ed = Ed {
+                win,
+                canvas,
+                buf: Vec::new(),
+                scale,
+                size,
+                logic,
+                palette: os_plugkit::palette(),
+                last_hint: String::new(),
+                dirty: true,
+                link: peer,
+            };
             ed.run();
         });
         if thread.is_none() {
@@ -853,15 +1253,21 @@ mod gui {
                     Input::Tick => self.poll(),
                     Input::Down { x, y, btn: b, dbl } => {
                         let (x, y) = (x / self.scale, y / self.scale);
-                        let acts = self.logic.down(x, y, btn(b), self.mods(), dbl && b == Button::Left);
+                        let acts =
+                            self.logic
+                                .down(x, y, btn(b), self.mods(), dbl && b == Button::Left);
                         self.act(acts);
                     }
                     Input::Move { x, y } => {
-                        let acts = self.logic.moved(x / self.scale, y / self.scale, self.mods());
+                        let acts = self
+                            .logic
+                            .moved(x / self.scale, y / self.scale, self.mods());
                         self.act(acts);
                     }
                     Input::Delta { dx, dy } => {
-                        let acts = self.logic.delta(dx / self.scale, dy / self.scale, self.mods());
+                        let acts = self
+                            .logic
+                            .delta(dx / self.scale, dy / self.scale, self.mods());
                         self.act(acts);
                     }
                     Input::Up { .. } => {
@@ -876,7 +1282,9 @@ mod gui {
                         }
                     }
                     Input::Wheel { x, y, notches } => {
-                        let acts = self.logic.wheel(x / self.scale, y / self.scale, notches, self.mods());
+                        let acts =
+                            self.logic
+                                .wheel(x / self.scale, y / self.scale, notches, self.mods());
                         self.act(acts);
                     }
                     Input::Key { .. } | Input::Drop { .. } => {}
@@ -893,7 +1301,8 @@ mod gui {
         }
 
         fn screen(&self, x: f32, y: f32) -> (i32, i32) {
-            self.win.to_root((x * self.scale) as i32, (y * self.scale) as i32)
+            self.win
+                .to_root((x * self.scale) as i32, (y * self.scale) as i32)
         }
 
         /// Timer / parameter change: expire confirmed overlay values and repaint.
@@ -928,7 +1337,7 @@ mod gui {
                         let (sx, sy) = self.screen(x, y);
                         let cur = self.logic.value_text(&id);
                         if let Some(t) = self.win.type_in(sx, sy, &cur, self.scale) {
-                            self.logic.entered(&id, &cur, &t);
+                            self.logic.typed(&id, &t);
                         }
                         self.dirty = true;
                     }
@@ -954,10 +1363,19 @@ mod gui {
 mod tests {
     use super::*;
     use crate::tests::SPECS;
-    use crate::{balance, chorus, fast_distortion, filter, flanger, formula_controller, peak_controller, phaser, soft_clipper, stereo_enhancer, stereo_shaper, transient_processor, Control};
+    use crate::{
+        Control, balance, chorus, fast_distortion, filter, flanger, formula_controller,
+        peak_controller, phaser, soft_clipper, stereo_enhancer, stereo_shaper, transient_processor,
+        vocoder,
+    };
 
     fn logic(spec: &'static Spec) -> Logic {
-        let mut l = Logic::new(spec, Arc::new(FxParams::new(spec)), Arc::new(Shared::default()), None);
+        let mut l = Logic::new(
+            spec,
+            Arc::new(FxParams::new(spec)),
+            Arc::new(Shared::default()),
+            None,
+        );
         paint(&mut l);
         l
     }
@@ -968,7 +1386,12 @@ mod tests {
     }
 
     fn centre(l: &Logic, t: &Target) -> (f32, f32) {
-        let h = l.hits.iter().rev().find(|h| &h.t == t).unwrap_or_else(|| panic!("no hit {t:?}"));
+        let h = l
+            .hits
+            .iter()
+            .rev()
+            .find(|h| &h.t == t)
+            .unwrap_or_else(|| panic!("no hit {t:?}"));
         (h.r.cx(), h.r.cy())
     }
 
@@ -978,38 +1401,80 @@ mod tests {
             let l = logic(spec);
             let (w, h) = (spec.size.0 as f32, spec.size.1 as f32);
             for s in spec.settings {
-                assert!(l.hits.iter().any(|h| h.t.id() == s.id), "{} {}", spec.name, s.id);
+                assert!(
+                    l.hits.iter().any(|h| h.t.id() == s.id),
+                    "{} {}",
+                    spec.name,
+                    s.id
+                );
             }
             for (i, a) in l.hits.iter().enumerate() {
-                assert!(a.r.x >= 0.0 && a.r.y >= 0.0 && a.r.x + a.r.w <= w && a.r.y + a.r.h <= h, "{} {:?}", spec.name, a.t);
+                assert!(
+                    a.r.x >= 0.0 && a.r.y >= 0.0 && a.r.x + a.r.w <= w && a.r.y + a.r.h <= h,
+                    "{} {:?}",
+                    spec.name,
+                    a.t
+                );
                 for b in &l.hits[i + 1..] {
-                    let apart = a.r.x + a.r.w <= b.r.x || b.r.x + b.r.w <= a.r.x || a.r.y + a.r.h <= b.r.y || b.r.y + b.r.h <= a.r.y;
+                    let apart = a.r.x + a.r.w <= b.r.x
+                        || b.r.x + b.r.w <= a.r.x
+                        || a.r.y + a.r.h <= b.r.y
+                        || b.r.y + b.r.h <= a.r.y;
                     assert!(apart, "{}: {:?} overlaps {:?}", spec.name, a.t, b.t);
                 }
             }
             // Controls sit inside a card (a tile is its own); the display too. Cards, the hint well and the wordmark
             // stay apart.
-            let cards: Vec<os_ui::Rect> = spec.cards.iter().map(|k| os_ui::Rect::span(k.x0, k.x1, k.y0, k.y1)).collect();
-            let within = |r: os_ui::Rect, k: &os_ui::Rect| r.x >= k.x && r.right() <= k.right() && r.y >= k.y && r.bottom() <= k.bottom();
+            let cards: Vec<os_ui::Rect> = spec
+                .cards
+                .iter()
+                .map(|k| os_ui::Rect::span(k.x0, k.x1, k.y0, k.y1))
+                .collect();
+            let within = |r: os_ui::Rect, k: &os_ui::Rect| {
+                r.x >= k.x && r.right() <= k.right() && r.y >= k.y && r.bottom() <= k.bottom()
+            };
             for c in spec.controls {
                 if matches!(c, Control::Tile { .. }) {
                     continue;
                 }
                 for r in l.hits.iter().filter(|h| h.t.id() == c.id()).map(|h| h.r) {
-                    assert!(cards.iter().any(|k| within(r, k)), "{} {} outside its card", spec.name, c.id());
+                    assert!(
+                        cards.iter().any(|k| within(r, k)),
+                        "{} {} outside its card",
+                        spec.name,
+                        c.id()
+                    );
                 }
             }
             if let Some(d) = &spec.display {
-                assert!(cards.iter().any(|k| within(d.r, k)), "{} display", spec.name);
+                assert!(
+                    cards.iter().any(|k| within(d.r, k)),
+                    "{} display",
+                    spec.name
+                );
             }
             let logo = l.hits.iter().find(|h| h.t == Target::Logo).unwrap().r;
             let mut boxes = cards.clone();
             boxes.extend(spec.hint);
             for (i, a) in boxes.iter().enumerate() {
-                assert!(a.x >= 0.0 && a.y >= 0.0 && a.right() <= w && a.bottom() <= h, "{} {a:?}", spec.name);
-                let apart = |b: &os_ui::Rect| a.right() <= b.x || b.right() <= a.x || a.bottom() <= b.y || b.bottom() <= a.y;
-                assert!(boxes[i + 1..].iter().all(apart), "{}: {a:?} overlaps", spec.name);
-                assert!(Some(*a) == spec.hint || apart(&logo), "{}: {a:?} under the wordmark", spec.name);
+                assert!(
+                    a.x >= 0.0 && a.y >= 0.0 && a.right() <= w && a.bottom() <= h,
+                    "{} {a:?}",
+                    spec.name
+                );
+                let apart = |b: &os_ui::Rect| {
+                    a.right() <= b.x || b.right() <= a.x || a.bottom() <= b.y || b.bottom() <= a.y
+                };
+                assert!(
+                    boxes[i + 1..].iter().all(apart),
+                    "{}: {a:?} overlaps",
+                    spec.name
+                );
+                assert!(
+                    Some(*a) == spec.hint || apart(&logo),
+                    "{}: {a:?} under the wordmark",
+                    spec.name
+                );
             }
         }
     }
@@ -1035,7 +1500,14 @@ mod tests {
         }
         assert_eq!(l.vals.plain("balance"), 0.0);
         assert_eq!(l.hint, "Balance: Centred");
-        l.delta(0.0, 0.0, Mods { shift: true, ..Mods::default() });
+        l.delta(
+            0.0,
+            0.0,
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+        );
         assert_eq!(l.vals.plain("balance"), -3.0);
         l.up(Btn::Left);
         // The wheel: two steps of the 256, stopping on the centre.
@@ -1045,10 +1517,21 @@ mod tests {
         l.wheel(x, y, 1.0, Mods::default());
         assert_eq!(l.vals.plain("balance"), 2.0);
         // Alt click and middle click reset.
-        l.down(x, y, Btn::Left, Mods { alt: true, ..Mods::default() }, false);
+        l.down(
+            x,
+            y,
+            Btn::Left,
+            Mods {
+                alt: true,
+                ..Mods::default()
+            },
+            false,
+        );
         assert_eq!(l.vals.plain("balance"), 0.0);
         let acts = l.down(x, y, Btn::Right, Mods::default(), false);
-        assert!(matches!(acts.last(), Some(Act::Menu(MenuReq::Param(id), _, _)) if id == "balance"));
+        assert!(
+            matches!(acts.last(), Some(Act::Menu(MenuReq::Param(id), _, _)) if id == "balance")
+        );
     }
 
     #[test]
@@ -1060,7 +1543,10 @@ mod tests {
         assert_eq!(l.hint, "Inversion: Right");
         let (x, y) = centre(&l, &Target::Choice("placement".into(), 0));
         l.down(x, y, Btn::Left, Mods::default(), false);
-        assert_eq!(l.params.v(os_engine::effects::stereo_enhancer::PLACEMENT), 0);
+        assert_eq!(
+            l.params.v(os_engine::effects::stereo_enhancer::PLACEMENT),
+            0
+        );
         assert_eq!(l.hint, "Phase offset placement: Pre");
         let mut l = logic(fast_distortion::SPEC);
         let (x, y) = centre(&l, &Target::Choice("type".into(), 1));
@@ -1083,7 +1569,14 @@ mod tests {
         l.down(x, y, Btn::Left, Mods::default(), false);
         // The travel (204 px) is the whole range (-25600..25600): 51 px down from 100 % (12800) is 0.
         for _ in 0..51 {
-            l.delta(0.0, 1.0, Mods { shift: true, ..Mods::default() });
+            l.delta(
+                0.0,
+                1.0,
+                Mods {
+                    shift: true,
+                    ..Mods::default()
+                },
+            );
         }
         l.up(Btn::Left);
         assert_eq!(l.params.v(1), 0);
@@ -1092,7 +1585,12 @@ mod tests {
         let k = transient_processor::SPEC.index("attack_shape").unwrap();
         let start = l.params.v(k);
         for i in 1..=3 {
-            let h = l.hits.iter().find(|h| h.t.id() == "attack_shape").unwrap().clone();
+            let h = l
+                .hits
+                .iter()
+                .find(|h| h.t.id() == "attack_shape")
+                .unwrap()
+                .clone();
             l.down(h.r.cx(), h.r.cy(), Btn::Left, Mods::default(), false);
             paint(&mut l);
             assert_eq!(l.params.v(k), (start + i) % 3);
@@ -1102,7 +1600,13 @@ mod tests {
         let h = l.hits.iter().find(|h| h.t.id() == "wave1").unwrap().clone();
         assert_eq!(h.t, Target::Knob("wave1".into()));
         // The tile's right end (the value text) turns the dial too: up to the top.
-        l.down(h.r.right() - 4.0, h.r.cy(), Btn::Left, Mods::default(), false);
+        l.down(
+            h.r.right() - 4.0,
+            h.r.cy(),
+            Btn::Left,
+            Mods::default(),
+            false,
+        );
         for _ in 0..200 {
             l.delta(0.0, -1.0, Mods::default());
         }
@@ -1116,10 +1620,15 @@ mod tests {
         let mut l = logic(soft_clipper::SPEC);
         let m = l.menu(&MenuReq::Param("post".into()));
         assert_eq!(m.find("Reset"), Some(Cmd::Reset("post".into())));
-        assert_eq!(m.find("Enter value..."), Some(Cmd::TypeIn("post".into())));
+        assert_eq!(m.find("Type in value..."), Some(Cmd::TypeIn("post".into())));
         assert_eq!(m.find("About Lemon Soft Clipper..."), Some(Cmd::About));
         l.vals.edit_plain("post", 10.0);
-        l.pick(&MenuReq::Param("post".into()), Cmd::Reset("post".into()), 0.0, 0.0);
+        l.pick(
+            &MenuReq::Param("post".into()),
+            Cmd::Reset("post".into()),
+            0.0,
+            0.0,
+        );
         assert_eq!(l.vals.plain("post"), 128.0);
         l.typed("post", "-6");
         assert_eq!(l.vals.text("post"), "-6.0dB");
@@ -1128,9 +1637,20 @@ mod tests {
         assert_eq!(l.vals.plain("threshold"), 100.0);
         l.typed("threshold", "-6");
         assert_eq!(l.vals.plain("threshold"), 64.0);
-        assert_eq!(l.pick(&MenuReq::Param("post".into()), Cmd::Automate("post".into()), 0.0, 0.0), vec![Act::Automate(1)]);
+        assert_eq!(
+            l.pick(
+                &MenuReq::Param("post".into()),
+                Cmd::Automate("post".into()),
+                0.0,
+                0.0
+            ),
+            vec![Act::Automate(1)]
+        );
         let (x, y) = centre(&l, &Target::Logo);
-        assert!(matches!(l.down(x, y, Btn::Left, Mods::default(), false).last(), Some(Act::Menu(MenuReq::About, _, _))));
+        assert!(matches!(
+            l.down(x, y, Btn::Left, Mods::default(), false).last(),
+            Some(Act::Menu(MenuReq::About, _, _))
+        ));
         assert_eq!(l.hint, "Lemon Soft Clipper");
         assert!(l.wheel(x, y, 1.0, Mods::default()).is_empty());
         let about = l.menu(&MenuReq::About);
@@ -1144,13 +1664,17 @@ mod tests {
         let mut l = logic(formula_controller::SPEC);
         let t = Target::Text("formula".into());
         let (x, y) = centre(&l, &t);
-        assert_eq!(l.down(x, y, Btn::Left, Mods::default(), false).last(), Some(&Act::TypeIn("formula".into(), x, y)));
+        assert_eq!(
+            l.down(x, y, Btn::Left, Mods::default(), false).last(),
+            Some(&Act::TypeIn("formula".into(), x, y))
+        );
         assert_eq!(l.hint, "Formula: Syntax error: no formula");
         assert_eq!(l.value_text("formula"), "");
         l.typed("formula", "a*0.5+SongTime/48");
         assert_eq!(l.value_text("formula"), "a*0.5+SongTime/48");
         assert_eq!(l.hint, "Formula: Compiled ok");
-        let s = os_engine::effects::formula_ctrl::Settings::from_state(&l.params.raw_copy()).unwrap();
+        let s =
+            os_engine::effects::formula_ctrl::Settings::from_state(&l.params.raw_copy()).unwrap();
         assert_eq!(s.formula, "a*0.5+SongTime/48");
         assert!(l.wheel(x, y, 1.0, Mods::default()).is_empty());
         l.down(x, y, Btn::Middle, Mods::default(), false);
@@ -1158,162 +1682,24 @@ mod tests {
         paint(&mut l);
         assert_eq!(l.view.raw, l.params.raw_copy());
         l.typed("formula", "a*");
-        assert_eq!(l.hint, "Formula: Syntax error: function or operand has too few arguments");
-    }
-
-    /// The editor painted at `scale`: its pixels (`0xRRGGBB`) and their row length.
-    fn pixels(l: &mut Logic, scale: f32) -> (Vec<u32>, usize) {
-        let (w, h) = ((l.spec.size.0 as f32 * scale) as u32, (l.spec.size.1 as f32 * scale) as u32);
-        let mut c = os_ui::Canvas::new(w, h, scale).unwrap();
-        l.paint(&mut c, &os_plugkit::palette());
-        let mut px = vec![0u32; (w * h) as usize];
-        c.copy_to_xrgb(&mut px);
-        (px.iter().map(|p| p & 0xff_ffff).collect(), w as usize)
-    }
-
-    /// The displays picture the settings as they play: stored values outside the ranges as stored, not as the knobs
-    /// (which keep to their ranges) show them.
-    #[test]
-    fn displays_draw_stored_values_outside_the_ranges() {
-        let cases: [(&'static Spec, &[(&str, i32)]); 3] = [
-            (balance::SPEC, &[("balance", -300), ("volume", 400)]),
-            (fast_distortion::SPEC, &[("threshold", 0), ("type", 1)]),
-            (soft_clipper::SPEC, &[("threshold", 0), ("post", 300)]),
-        ];
-        for (spec, stored) in cases {
-            let mut l = logic(spec);
-            let mut raw = l.params.raw_copy();
-            let mut v: Vec<i32> = spec.settings.iter().map(|s| s.start).collect();
-            for &(id, x) in stored {
-                let k = spec.index(id).unwrap();
-                crate::params::set_setting(spec, &mut raw, k, x);
-                v[k] = x;
-            }
-            l.params.set_raw(raw.clone());
-            // The knobs at the stored values as their ranges keep them (as a loaded state sets them).
-            let knobs = crate::params::values_of(spec, &raw);
-            for (k, x) in knobs.iter().enumerate() {
-                l.vals.edit_plain(spec.settings[k].id, *x as f32);
-            }
-            // The display's inside (clear of the well's rounded corners), as painted and as drawn over from `values`.
-            let d = spec.display.as_ref().unwrap();
-            let inside = |px: &[u32]| -> Vec<u32> {
-                let w = spec.size.0 as usize;
-                let (x0, y0) = (d.r.x as usize + 6, d.r.y as usize + 6);
-                (y0..(d.r.bottom() as usize - 6)).flat_map(|y| px[y * w + x0..y * w + d.r.right() as usize - 6].to_vec()).collect()
-            };
-            let (px, _) = pixels(&mut l, 1.0);
-            let mut drawn = |values: &[i32]| {
-                let mut c = os_ui::Canvas::new(spec.size.0, spec.size.1, 1.0).unwrap();
-                l.paint(&mut c, &os_plugkit::palette());
-                os_ui::kit::lemon::plug_well(&mut c, d.r, 6.0);
-                (d.draw)(&mut c, d.r, values);
-                let mut px = vec![0u32; (spec.size.0 * spec.size.1) as usize];
-                c.copy_to_xrgb(&mut px);
-                inside(&px.iter().map(|p| p & 0xff_ffff).collect::<Vec<u32>>())
-            };
-            assert!(inside(&px) == drawn(&v), "{}", spec.name);
-            assert!(inside(&px) != drawn(&knobs), "{}", spec.name);
-        }
-    }
-
-    /// Enter on a type-in box left as it opened changes nothing, also where its text reads back as another value.
-    #[test]
-    fn enter_on_an_unchanged_type_in_box_changes_nothing() {
-        let spec = soft_clipper::SPEC;
-        let k = spec.index("threshold").unwrap();
-        let (lo, hi) = spec.settings[k].range;
-        let v = (lo..=hi).find(|&v| v != spec.settings[k].start && (spec.parse)(k, &(spec.text)(k, v)) != Some(v)).unwrap();
-        let mut l = logic(spec);
-        l.vals.edit_plain("threshold", v as f32);
-        let t = l.vals.text("threshold");
-        l.entered("threshold", &t, &t);
-        assert_eq!(l.vals.plain("threshold"), v as f32);
-    }
-
-    /// A typed text that several values show keeps the current value if it is one of them, else the default if it is
-    /// (else the nearest, as the effect's parse picks).
-    #[test]
-    fn a_typed_text_several_values_show_keeps_the_current_or_the_default() {
-        let spec = soft_clipper::SPEC;
-        let k = spec.index("threshold").unwrap();
-        let (lo, hi) = spec.settings[k].range;
-        let (text, parse, start) = (spec.text, spec.parse, spec.settings[k].start);
-        let v = (lo..=hi).find(|&v| v != start && parse(k, &text(k, v)) != Some(v)).unwrap();
-        let mut l = logic(spec);
-        l.vals.edit_plain("threshold", v as f32);
-        // The text changed (no unit), the value it shows the same: the current value stays.
-        let t = text(k, v);
-        l.entered("threshold", &t, t.trim_end_matches("dB"));
-        assert_eq!(l.vals.plain("threshold"), v as f32);
-        // The default's text, which reads back as another value, from elsewhere: the default.
-        assert_ne!(parse(k, &text(k, start)), Some(start));
-        l.vals.edit_plain("threshold", 64.0);
-        l.entered("threshold", &text(k, 64), &text(k, start));
-        assert_eq!(l.vals.plain("threshold"), start as f32);
-        // A text only one value shows: that value.
-        l.entered("threshold", &text(k, start), &text(k, 64));
-        assert_eq!(l.vals.plain("threshold"), 64.0);
-    }
-
-    /// A heading's rules are there at every scale or at none.
-    #[test]
-    fn heading_rules_do_not_come_and_go_with_the_scale() {
-        for spec in SPECS {
-            let mut l = logic(spec);
-            // Whether each heading has its rule: the rule's grey 5 px into the card on the rule's lower row.
-            let mut rules = |s: f32| -> Vec<bool> {
-                let (px, w) = pixels(&mut l, s);
-                let cards = spec.cards.iter().filter(|k| !k.heading.is_empty());
-                cards.map(|k| px[((k.y0 - 11.0) * s) as usize * w + ((k.x0 + 5.5) * s) as usize] == 0x3c3c3c).collect()
-            };
-            let one = rules(1.0);
-            assert_eq!(rules(1.5), one, "{}", spec.name);
-            assert_eq!(rules(2.0), one, "{}", spec.name);
-        }
-    }
-
-    /// The newer pages' wordmarks end 6 px clear of the right edge (Lemon Filter's at x 480, spec
-    /// plugins/lemon-filter.md §2).
-    #[test]
-    fn the_newer_pages_wordmarks_end_6_px_from_the_right_edge() {
-        let specs = [filter::SPEC, flanger::SPEC, phaser::SPEC, peak_controller::SPEC, formula_controller::SPEC, crate::vocoder::SPEC];
-        for spec in specs {
-            let mut l = logic(spec);
-            let (px, w) = pixels(&mut l, 1.0);
-            let logo = l.hits.iter().find(|h| h.t == Target::Logo).unwrap().r;
-            // The wordmark's ink: anything but the background in its rows.
-            let ink = |x: usize| (logo.y as usize..logo.bottom() as usize).any(|y| px[y * w + x] != 0x2b2b2b);
-            let last = (0..w).rev().find(|&x| ink(x)).unwrap();
-            assert_eq!(last, w - 7, "{}", spec.name);
-        }
-        assert_eq!(filter::SPEC.size.0 - 7, 480);
-    }
-
-    /// A hint or status too wide for its well ends in "…" after a whole character, and fits (Lemon Balance's longest
-    /// hint, in its 86 px).
-    #[test]
-    fn texts_too_wide_for_their_wells_end_in_an_ellipsis() {
-        let mut c = os_ui::Canvas::new(100, 40, 1.0).unwrap();
-        let f = os_ui::Font::new(11);
-        let s = "Balance: 100.0% right";
-        let whole = c.text_width(f, s);
-        assert_eq!(view::fitted(&mut c, f, s, whole), s);
-        for max in [86.0, 60.0, 30.0] {
-            let t = view::fitted(&mut c, f, s, max);
-            assert!(c.text_width(f, &t) <= max, "{t}");
-            let kept = t.strip_suffix('…').unwrap();
-            assert!(!kept.is_empty() && s.starts_with(kept), "{t}");
-        }
+        assert_eq!(
+            l.hint,
+            "Formula: Syntax error: function or operand has too few arguments"
+        );
     }
 
     /// `SMALLFX_PNG=<dir> cargo test -p lemon-small-fx -- --ignored`: the editors at a few settings, as PNGs.
     #[test]
     #[ignore]
     fn render_editor() {
-        let Some(dir) = std::env::var_os("SMALLFX_PNG") else { return };
+        let Some(dir) = std::env::var_os("SMALLFX_PNG") else {
+            return;
+        };
         let save = |l: &mut Logic, name: &str, scale: f32| {
-            let (w, h) = ((l.spec.size.0 as f32 * scale) as u32, (l.spec.size.1 as f32 * scale) as u32);
+            let (w, h) = (
+                (l.spec.size.0 as f32 * scale) as u32,
+                (l.spec.size.1 as f32 * scale) as u32,
+            );
             let mut c = os_ui::Canvas::new(w, h, scale).unwrap();
             l.paint(&mut c, &os_plugkit::palette());
             let mut px = vec![0u32; (w * h) as usize];
@@ -1322,30 +1708,160 @@ mod tests {
             for (o, p) in pm.data_mut().chunks_mut(4).zip(&px) {
                 o.copy_from_slice(&[(p >> 16) as u8, (p >> 8) as u8, *p as u8, 255]);
             }
-            pm.save_png(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
+            pm.save_png(std::path::Path::new(&dir).join(format!("{name}.png")))
+                .unwrap();
         };
         let settings: [(&Spec, &str, &[(&str, i32)]); 13] = [
-            (soft_clipper::SPEC, "soft_clipper", &[("threshold", 64), ("post", 150)]),
-            (fast_distortion::SPEC, "fast_distortion", &[("pre", 192), ("threshold", 3), ("type", 1), ("mix", 100), ("post", 110)]),
-            (balance::SPEC, "balance", &[("balance", -70), ("volume", 220)]),
-            (stereo_enhancer::SPEC, "stereo_enhancer", &[("separation", -54), ("phase", -248), ("pan", -18), ("invert", 1)]),
+            (
+                soft_clipper::SPEC,
+                "soft_clipper",
+                &[("threshold", 64), ("post", 150)],
+            ),
+            (
+                fast_distortion::SPEC,
+                "fast_distortion",
+                &[
+                    ("pre", 192),
+                    ("threshold", 3),
+                    ("type", 1),
+                    ("mix", 100),
+                    ("post", 110),
+                ],
+            ),
+            (
+                balance::SPEC,
+                "balance",
+                &[("balance", -70), ("volume", 220)],
+            ),
+            (
+                stereo_enhancer::SPEC,
+                "stereo_enhancer",
+                &[
+                    ("separation", -54),
+                    ("phase", -248),
+                    ("pan", -18),
+                    ("invert", 1),
+                ],
+            ),
             (
                 transient_processor::SPEC,
                 "transient_processor",
-                &[("attack", 160), ("drive", 38), ("release", 120), ("attack_shape", 2), ("split", 30), ("balance", 50), ("on", 0)],
+                &[
+                    ("attack", 160),
+                    ("drive", 38),
+                    ("release", 120),
+                    ("attack_shape", 2),
+                    ("split", 30),
+                    ("balance", 50),
+                    ("on", 0),
+                ],
             ),
-            (chorus::SPEC, "chorus", &[("delay", 40), ("depth", 4375), ("stereo", 149), ("speed1", 3229), ("wave1", 587), ("wave3", 1024), ("cross", 65), ("cutoff", 4531), ("wet", 491)]),
-            (stereo_shaper::SPEC, "stereo_shaper", &[("rl", 8076), ("left", 8076), ("right", -8076), ("lr", 8076), ("delay", 1408), ("phase", -2496), ("position", 0)]),
-            (filter::SPEC, "filter", &[("cutoff", 544), ("resonance", 900), ("low", 0), ("band", 1024), ("high", 464), ("x2", 1)]),
-            (flanger::SPEC, "flanger", &[("delay", 300), ("depth", 4200), ("rate", 900), ("shape", 512), ("feed", 70), ("invert_feed", 0), ("damp", 1500), ("cross", 0)]),
-            (phaser::SPEC, "phaser", &[("sweep", 4000), ("range", 1024), ("stages", 15), ("feedback", 850), ("dry_wet", 0), ("gain", 2500)]),
-            (peak_controller::SPEC, "peak_controller", &[("base", 13568), ("amount", -120), ("decay", 30), ("lfo_amount", 200), ("speed", 13000), ("shape", 3), ("ramp", 1)]),
-            (formula_controller::SPEC, "formula_controller", &[("a", 46592), ("b", 65536), ("c", 32768)]),
-            (crate::vocoder::SPEC, "vocoder", &[("car", 8000), ("noise", 6400), ("mod_input", 1), ("car_input", 0), ("rms", 1), ("order", 4), ("bands", 16), ("lr", 1)]),
+            (
+                chorus::SPEC,
+                "chorus",
+                &[
+                    ("delay", 40),
+                    ("depth", 4375),
+                    ("stereo", 149),
+                    ("speed1", 3229),
+                    ("wave1", 587),
+                    ("wave3", 1024),
+                    ("cross", 65),
+                    ("cutoff", 4531),
+                    ("wet", 491),
+                ],
+            ),
+            (
+                stereo_shaper::SPEC,
+                "stereo_shaper",
+                &[
+                    ("rl", 8076),
+                    ("left", 8076),
+                    ("right", -8076),
+                    ("lr", 8076),
+                    ("delay", 1408),
+                    ("phase", -2496),
+                    ("position", 0),
+                ],
+            ),
+            (
+                filter::SPEC,
+                "filter",
+                &[
+                    ("cutoff", 544),
+                    ("resonance", 900),
+                    ("low", 0),
+                    ("band", 1024),
+                    ("high", 464),
+                    ("x2", 1),
+                ],
+            ),
+            (
+                flanger::SPEC,
+                "flanger",
+                &[
+                    ("delay", 300),
+                    ("depth", 4200),
+                    ("rate", 900),
+                    ("shape", 512),
+                    ("feed", 70),
+                    ("invert_feed", 0),
+                    ("damp", 1500),
+                    ("cross", 0),
+                ],
+            ),
+            (
+                phaser::SPEC,
+                "phaser",
+                &[
+                    ("sweep", 4000),
+                    ("range", 1024),
+                    ("stages", 15),
+                    ("feedback", 850),
+                    ("dry_wet", 0),
+                    ("gain", 2500),
+                ],
+            ),
+            (
+                vocoder::SPEC,
+                "vocoder",
+                &[
+                    ("car", 8000),
+                    ("noise", 6400),
+                    ("mod_input", 1),
+                    ("car_input", 0),
+                    ("rms", 1),
+                    ("order", 4),
+                    ("bands", 16),
+                    ("lr", 1),
+                ],
+            ),
+            (
+                peak_controller::SPEC,
+                "peak_controller",
+                &[
+                    ("base", 13568),
+                    ("amount", -120),
+                    ("decay", 30),
+                    ("lfo_amount", 200),
+                    ("speed", 13000),
+                    ("shape", 3),
+                    ("ramp", 1),
+                ],
+            ),
+            (
+                formula_controller::SPEC,
+                "formula_controller",
+                &[("a", 46592), ("b", 65536), ("c", 32768)],
+            ),
         ];
         for (spec, name, values) in settings {
             let mut l = logic(spec);
-            l.hint = format!("{}: {}", spec.settings[0].name, l.vals.text(spec.settings[0].id));
+            l.hint = format!(
+                "{}: {}",
+                spec.settings[0].name,
+                l.vals.text(spec.settings[0].id)
+            );
             save(&mut l, &format!("{name}_default"), 1.0);
             save(&mut l, &format!("{name}_default_x2"), 2.0);
             for (id, v) in values {

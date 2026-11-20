@@ -69,6 +69,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Formula Controller",
     word: "FORMULA CONTROLLER",
     about: "Lemon Studio's formula controller",
+    manual: &[],
     settings: &SETTINGS,
     version: Some(VERSION),
     any_version: false,
@@ -86,6 +87,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: false,
 };

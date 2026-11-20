@@ -70,6 +70,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Phaser",
     word: "PHASER",
     about: "Lemon Studio's phaser",
+    manual: &[],
     settings: &SETTINGS,
     version: Some(dsp::VERSION),
     any_version: false,
@@ -88,6 +89,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: true,
 };

@@ -83,6 +83,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Stereo Shaper",
     word: "STEREO SHAPER",
     about: "Lemon Studio's stereo shaper",
+    manual: &[],
     settings: &SETTINGS,
     version: Some(dsp::VERSION),
     any_version: true,
@@ -99,6 +100,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[(69.0, 286.0, "LEFT OUT"), (155.0, 286.0, "RIGHT OUT")],
     text,
     parse,
+    shown: None,
     sound,
     rings: true,
 };

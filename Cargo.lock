@@ -2069,6 +2069,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lemon-glitch"
+version = "0.0.1"
+dependencies = [
+ "lemon-small-fx",
+ "nih_plug",
+ "os-plugkit",
+ "os-ui",
+ "tiny-skia",
+]
+
+[[package]]
 name = "lemon-limiter"
 version = "0.0.1"
 dependencies = [
@@ -2271,6 +2282,19 @@ dependencies = [
  "libc",
  "plain",
  "redox_syscall 0.9.4",
+]
+
+[[package]]
+name = "lime-glitch-sequencer"
+version = "0.0.1"
+dependencies = [
+ "nih_plug",
+ "os-hostlink",
+ "os-plugkit",
+ "os-theme",
+ "os-ui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3049,6 +3073,7 @@ dependencies = [
  "lemon-filter",
  "lemon-flanger",
  "lemon-formula-controller",
+ "lemon-glitch",
  "lemon-limiter",
  "lemon-parametric-eq-2",
  "lemon-peak-controller",
@@ -3063,6 +3088,7 @@ dependencies = [
  "lemon-transient-processor",
  "lemon-vocoder",
  "libc",
+ "lime-glitch-sequencer",
  "midir",
  "mp3lame-encoder",
  "objc2 0.6.5",

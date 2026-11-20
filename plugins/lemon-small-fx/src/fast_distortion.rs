@@ -44,6 +44,7 @@ pub const SPEC: &Spec = &Spec {
     name: "Lemon Fast Distortion",
     word: "FAST DISTORTION",
     about: "Lemon Studio's fast distortion",
+    manual: &[],
     settings: &SETTINGS,
     version: None,
     any_version: false,
@@ -60,6 +61,7 @@ pub const SPEC: &Spec = &Spec {
     labels: &[],
     text,
     parse,
+    shown: None,
     sound,
     rings: false,
 };
